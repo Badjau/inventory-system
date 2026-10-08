@@ -14,7 +14,7 @@ final class InventoryService
 
     private array $actor;
 
-    public function __construct(private PDO $db, ?array $actor = null)
+    public function __construct(private PDO $db, ?array $actor = null, private ?array $deviceTypes = null)
     {
         // Copy only audit identity, never credentials or client-supplied fields.
         $this->actor = $actor === null
@@ -153,7 +153,8 @@ final class InventoryService
     {
         $type = self::text($input, 'device_type', true);
         $condition = self::text($input, 'device_condition', true);
-        if (!in_array($type, self::TYPES, true) || !in_array($condition, self::CONDITIONS, true)) {
+        $types = $this->deviceTypes ?? (new DevicePreset(dirname(__DIR__) . '/storage/desktop-preset.json'))->read()['device_types'];
+        if (!in_array($type, $types, true) || !in_array($condition, self::CONDITIONS, true)) {
             throw new ValidationException('Choose a supported device type and condition.');
         }
         $specs = $input['specifications'] ?? [];

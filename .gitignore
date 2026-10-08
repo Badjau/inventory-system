@@ -6,3 +6,5 @@
 /storage/*.xlsx
 /storage/evidence/
 /~$*
+/storage/desktop-preset.json
+/storage/desktop-preset.json.lock

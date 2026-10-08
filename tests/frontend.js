@@ -66,6 +66,9 @@ async function startupSmoke(role = 'editor') {
       elements.set(match[1], { textContent: '', value: '', hidden: false, disabled: false, files: [],
         showModal() { this.open = true; }, close() { this.open = false; },
         classList: { toggle() {} }, querySelectorAll(selector) {
+          if (selector === '[data-spec-row]') return [...this.innerHTML.matchAll(/<input maxlength="100" value="([^"]*)" required><\/label><label>Value<textarea rows="2" maxlength="4000">([\s\S]*?)<\/textarea>/g)].map(match => ({
+            querySelector(selector) { return { value: match[selector === 'input' ? 1 : 2] }; }
+          }));
           if (selector !== '[data-thumbnail]') return [];
           return [...this.innerHTML.matchAll(/data-thumbnail="([^"]+)"/g)].map(match => {
             const image = { dataset: { thumbnail: match[1] }, classList: { add() {} }, addEventListener() {}, remove() {} };
@@ -74,30 +77,32 @@ async function startupSmoke(role = 'editor') {
           });
         },
         addEventListener(type, handler) { listeners[match[1] + ':' + type] = handler; },
+        insertAdjacentHTML(position, value) { this.innerHTML += value; },
         set innerHTML(value) { this.markup = value; addElements(value); },
         get innerHTML() { return this.markup || ''; } });
     }
   }
   addElements(page);
+  const deviceTypeSelector = { value: 'Laptop', addEventListener(type, handler) { listeners['device-type:' + type] = handler; } };
   const document = {
-    querySelector(selector) { return selector === 'meta[name="inventory-role"]' ? { content: role } : selector === 'meta[name="csrf-token"]' ? { content: 'test' } : elements.get(selector.slice(1)) || null; },
+    querySelector(selector) { return selector === '#dialog-fields select[name="device_type"]' ? deviceTypeSelector : selector === 'meta[name="inventory-role"]' ? { content: role } : selector === 'meta[name="csrf-token"]' ? { content: 'test' } : elements.get(selector.slice(1)) || null; },
     addEventListener(type, handler) { listeners['document:' + type] = handler; },
     dispatchEvent(event) { listeners['document:' + event.type]?.(event); }
   };
   const devices = [
     { id: 1, name: 'Recorded holder laptop', device_type: 'Laptop', holder_kind: 'imported', holder_name: 'Recorded holder',
-      device_condition: 'Good', specifications: {}, photo_event_id: 7 },
+      device_condition: 'Good', specifications: { 'Original laptop spec': 'Keep this value' }, photo_event_id: 7 },
     { id: 2, name: 'Unassigned mouse', device_type: 'Mouse', holder_kind: 'unassigned', device_condition: 'Good', specifications: {} },
     { id: 3, name: 'Faulty monitor', device_type: 'Monitor', holder_kind: 'unassigned', device_condition: 'Faulty', specifications: {} }
   ];
   const fetch = async url => ({ ok: true, json: async () => ({ data: url.includes('action=history') ? (url.endsWith('id=2') ? [
     { id: 9, message: 'Uploaded photos', photos: [{ name: 'Removed.jpg' }, { name: 'Kept.jpg' }], removed_photo_indexes: [0] }
   ] : []) :
-    { devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [
+    { desktop_preset: { version: 0, device_types: ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other', 'Router'], fields: [{ name: 'MAC ADDRESS', value: '' }, { name: 'Custom <spec>', value: '<default>' }] }, devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [
       { device_id: 1, message: 'Device edited', actor: { id: 1, name: '<Admin>', username: 'audit-user' } },
       { device_id: 2, message: 'Legacy edit', actor: null }
     ] } }) });
-  new Function('document', 'InventoryModel', 'fetch', 'IntersectionObserver', app)(document, require('../public/assets/model.js'), fetch, TestObserver);
+  new Function('document', 'InventoryModel', 'fetch', 'IntersectionObserver', 'InventoryPhotos', app)(document, require('../public/assets/model.js'), fetch, TestObserver, { attach: () => () => [] });
   for (let i = 0; i < 10; i++) await Promise.resolve();
   assert.equal(elements.get('add-device').disabled, role === 'viewer');
   assert.equal(elements.get('stats').innerHTML.match(/data-stat=/g).length, 4);
@@ -145,7 +150,44 @@ async function startupSmoke(role = 'editor') {
   assert.equal(elements.get('add-device').textContent, '＋ Add device');
   assert.equal(elements.get('table-body').innerHTML.includes('Recorded holder laptop'), false);
   console.log('PASS: app startup, removed Holder Review, and summary card views.');
+  listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'preset' } }) } });
+  assert.equal(elements.get('inventory-layout').hidden, true);
+  assert.equal(elements.get('preset-panel').hidden, false);
+  assert.equal(elements.get('stats').hidden, true);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('MAC ADDRESS'), true);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('Custom &lt;spec&gt;'), true);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('&lt;default&gt;'), true);
+  assert.equal(elements.get('add-device').textContent, '＋ Create Desktop');
+  assert.equal(elements.get('preset-panel').innerHTML.includes('Create Device Type'), true);
+  assert.equal(elements.get('type-filter').innerHTML.includes('Router'), true);
+  if (role !== 'viewer') {
+    listeners['create-device-type:click']();
+    assert.equal(elements.get('dialog-title').textContent, 'Create Device Type');
+    assert.equal(elements.get('dialog-fields').innerHTML.includes('name="name" maxlength="30" required'), true);
+    listeners['document:click']({ target: { closest: () => ({ id: 'add-device', dataset: {} }) } });
+    assert.equal(elements.get('spec-editor').querySelectorAll('[data-spec-row]').length, 2);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('&lt;default&gt;'), true);
+    assert.equal(elements.get('dialog-fields').innerHTML.includes('Router'), true);
+    deviceTypeSelector.value = 'Laptop';
+    listeners['device-type:change']();
+    assert.equal(elements.get('spec-editor').innerHTML, '');
+    deviceTypeSelector.value = 'Router';
+    listeners['device-type:change']();
+    assert.equal(elements.get('spec-editor').innerHTML, '');
+    deviceTypeSelector.value = 'Desktop';
+    listeners['device-type:change']();
+    assert.equal(elements.get('spec-editor').querySelectorAll('[data-spec-row]').length, 2);
+    listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'devices' } }) } });
+    listeners['document:click']({ target: { closest: () => ({ dataset: { device: '1' } }) } });
+    elements.get('spec-editor').innerHTML = '';
+    listeners['document:click']({ target: { closest: () => ({ id: 'edit-device', dataset: {} }) } });
+    assert.equal(elements.get('spec-editor').innerHTML.includes('Original laptop spec'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('Keep this value'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('MAC ADDRESS'), false);
+    console.log('PASS: custom type choices, Desktop defaults, empty other types, and existing specifications.');
+  }
   listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'activity' } }) } });
+  assert.equal(elements.get('inventory-layout').hidden, false);
   assert.equal(elements.get('table-head').innerHTML.includes('Changed by'), true);
   assert.equal(elements.get('table-body').innerHTML.includes('&lt;Admin&gt;'), true);
   assert.equal(elements.get('table-body').innerHTML.includes('Not recorded'), true);

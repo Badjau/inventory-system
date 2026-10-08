@@ -45,6 +45,7 @@ if (!$user) {
       <button class="nav-item" data-view="shared"><span>▤</span>Shared devices <b id="count-shared">0</b></button>
       <button class="nav-item" data-view="attention"><span>⚑</span>Needs attention <b id="count-attention">0</b></button>
       <button class="nav-item" data-view="activity"><span>◷</span>Activity</button>
+      <button class="nav-item" data-view="preset"><span>≡</span>Preset</button>
     </nav>
     <div class="sidebar-bottom"><div class="profile"><span class="avatar">IT</span><div><?= htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') ?><small><?= $user['role'] === 'editor' ? 'Editor' : 'Read-only' ?></small></div></div>
       <form action="login.php" method="post"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8') ?>"><button class="text-button" name="logout" value="1">Sign out</button></form>
@@ -56,6 +57,7 @@ if (!$user) {
       <div id="notice" role="status" hidden></div>
       <div id="error" role="alert" hidden></div>
       <div id="stats" class="stats"></div>
+      <section id="preset-panel" class="inventory-panel" aria-label="Desktop preset" hidden></section>
       <div id="inventory-layout" class="inventory-layout">
         <section class="inventory-panel" aria-label="Directory">
           <div class="toolbar">

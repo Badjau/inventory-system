@@ -14,7 +14,7 @@ try {
     $action = $_GET['action'] ?? 'state';
     $method = $_SERVER['REQUEST_METHOD'];
     $getActions = ['state', 'history', 'export', 'evidence'];
-    $postActions = ['associate', 'device', 'assignment', 'note', 'photo-remove', 'import-preview', 'import-apply'];
+    $postActions = ['preset', 'associate', 'device', 'assignment', 'note', 'photo-remove', 'import-preview', 'import-apply'];
     if (!is_string($action) || !in_array($action, [...$getActions, ...$postActions], true)) {
         throw new ValidationException('Endpoint not found.', 404);
     }
@@ -36,7 +36,9 @@ try {
         if (!is_array($input) || !str_starts_with(ltrim($payload), '{')) throw new ValidationException('Send a device object.');
     }
     $db = Database::connect(inventory_config()['database']);
-    $service = new InventoryService($db, $user);
+    $preset = new Inventory\DevicePreset(dirname(__DIR__) . '/storage/desktop-preset.json');
+    if ($action === 'preset') Http::json(['data' => $preset->save($input)]);
+    $service = new InventoryService($db, $user, $preset->read()['device_types']);
     $hr = new HrDirectory($db);
     if ($action === 'evidence') {
         $eventId = InventoryService::positiveInt($_GET['event'] ?? null, 'event ID');
@@ -120,7 +122,7 @@ try {
     }
     $data = match ($action) {
         'state' => ['devices' => array_map($departmentNames->display(...), $service->devices(true)),
-            'employees' => $hr->all(), 'associates' => (new Inventory\Associates($db))->all(), 'departments' => $departments, 'branches' => $hr->branches(), 'activity' => $service->history()],
+            'employees' => $hr->all(), 'associates' => (new Inventory\Associates($db))->all(), 'departments' => $departments, 'branches' => $hr->branches(), 'activity' => $service->history(), 'desktop_preset' => $preset->read()],
         'associate' => (new Inventory\Associates($db))->add($input),
         'history' => $service->history(InventoryService::positiveInt($_GET['id'] ?? null, 'device ID')),
         'assignment' => $service->assign($input, $hr),

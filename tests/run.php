@@ -401,6 +401,7 @@ try {
     require __DIR__ . '/evidence.php';
     require __DIR__ . '/photo-removal.php';
     require __DIR__ . '/actors.php';
+    require __DIR__ . '/presets.php';
     echo "PASS: $assertions assertions (" . ($mysql ? 'MySQL' : 'isolated SQLite fixture') . ").\n";
 } catch (Throwable $error) {
     fwrite(STDERR, 'FAIL: ' . $error->getMessage() . PHP_EOL . $error->getTraceAsString() . PHP_EOL);

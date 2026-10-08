@@ -3,9 +3,9 @@
   'use strict';
   const $ = selector => document.querySelector(selector);
   const { escape: esc, attention, displayDevice, filterDevices } = InventoryModel;
-  const types = ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other'];
+  let types = ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other'];
   const conditions = ['Good', 'Needs attention', 'Faulty', 'Unknown'];
-  const titles = { devices: 'Devices', people: 'People', shared: 'Shared devices', attention: 'Needs attention', activity: 'Activity' };
+  const titles = { devices: 'Devices', people: 'People', shared: 'Shared devices', attention: 'Needs attention', activity: 'Activity', preset: 'Preset' };
   let state = { devices: [], employees: [], branches: [], departments: [], activity: [] };
   let view = 'devices', selected = null, employeeFilter = null, submitHandler = null, loading = false;
   let historyRequest = 0;
@@ -79,6 +79,10 @@
     showError('');
     try {
       state = await request('state');
+      types = state.desktop_preset?.device_types || types;
+      const currentType = $('#type-filter').value;
+      $('#type-filter').innerHTML = '<option value="">All types</option>' + options(types);
+      $('#type-filter').value = types.includes(currentType) ? currentType : '';
       const departments = [...new Set(state.departments.map(row => row.name))];
       const branches = [...new Set([...state.branches.map(row => row.name), 'Other'])];
       const currentDepartment = $('#department-filter').value;
@@ -119,7 +123,15 @@
     const rows = devices();
     renderStats(rows);
     $('#page-title').textContent = titles[view];
-    $('#add-device').textContent = view === 'people' ? '＋ Add User' : '＋ Add device';
+    $('#add-device').textContent = view === 'people' ? '＋ Add User' : view === 'preset' ? '＋ Create Desktop' : '＋ Add device';
+    $('#preset-panel').hidden = view !== 'preset';
+    $('#inventory-layout').hidden = view === 'preset';
+    $('#stats').hidden = view === 'preset';
+    if (view === 'preset') {
+      $('#page-description').textContent = 'Manage device types and Desktop specification defaults.';
+      renderPreset();
+      return;
+    }
     const filteredEmployee = people().find(employee => Number(employee.id) === Number(employeeFilter));
     $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users stay in inventory only.' :
       view === 'activity' ? 'The latest 100 inventory changes. Select a device to see its full history.' :
@@ -238,7 +250,71 @@
     $('#dialog').showModal();
   }
 
-  function editDevice(device = null) {
+  function specMarkup(key = '', value = '', arrange = false) {
+    return `<div class="spec-edit-row${arrange ? ' preset-row' : ''}" data-spec-row>${arrange ? '<div class="preset-order"><button type="button" class="text-button" draggable="true" data-drag-spec aria-label="Drag specification to reorder">↕</button><button type="button" class="text-button" data-move-spec="-1" aria-label="Move specification up">↑</button><button type="button" class="text-button" data-move-spec="1" aria-label="Move specification down">↓</button></div>' : ''}<label>Specification name<input maxlength="100" value="${esc(key)}" required></label><label>Value<textarea rows="2" maxlength="4000">${esc(value)}</textarea></label><button type="button" class="text-button" data-remove-spec>Remove</button></div>`;
+  }
+
+  function readSpecs(container) {
+    return [...container.querySelectorAll('[data-spec-row]')].map(row => ({ name: row.querySelector('input').value.trim(), value: row.querySelector('textarea').value.trim() }));
+  }
+
+  function renderPreset() {
+    const panel = $('#preset-panel');
+    const preset = state.desktop_preset;
+    if (!preset) { panel.innerHTML = '<p class="empty-state">Refresh to load the Desktop preset.</p>'; return; }
+    panel.innerHTML = `<div class="action-row"><h2>Device types</h2><button type="button" class="button" id="create-device-type">Create Device Type</button></div><p>${types.map(esc).join(' · ')}</p><form id="preset-form"><h2>Desktop</h2><p>Drag the ↕ handle to arrange fields, or use the arrow buttons. Add specification names and optional default values. Saving affects future creation only. Other device types start with no specifications.</p><div id="preset-editor">${preset.fields.map(item => specMarkup(item.name, item.value, true)).join('')}</div><div class="action-row"><button type="button" class="button" id="preset-add">Add specification</button><button type="submit" class="button primary">Save preset</button></div><p id="preset-status" role="status"></p></form>`;
+    if (!canEdit) { panel.querySelectorAll('input, textarea, button').forEach(element => { element.disabled = true; }); return; }
+    $('#create-device-type').addEventListener('click', () => {
+      openDialog('Create Device Type', 'Enter a name for the new device type.',
+        '<label>Device type name<input name="name" maxlength="30" required></label>',
+        async form => {
+          state.desktop_preset = await request('preset', 'POST', { version: preset.version, name: form.name });
+        });
+    });
+    const editor = $('#preset-editor');
+    let dragged = null;
+    editor.addEventListener('dragstart', event => {
+      if (!event.target.closest('[data-drag-spec]')) { event.preventDefault(); return; }
+      dragged = event.target.closest('[data-spec-row]');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', 'specification');
+    });
+    editor.addEventListener('dragover', event => { if (dragged) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } });
+    editor.addEventListener('drop', event => {
+      if (!dragged) return;
+      event.preventDefault();
+      const row = event.target.closest('[data-spec-row]');
+      if (row && row !== dragged) editor.insertBefore(dragged, event.clientY > row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2 ? row.nextSibling : row);
+      dragged = null;
+    });
+    editor.addEventListener('dragend', () => { dragged = null; });
+    editor.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const row = button.closest('[data-spec-row]');
+      if (button.hasAttribute('data-remove-spec')) row.remove();
+      if (button.dataset.moveSpec === '-1' && row.previousElementSibling) editor.insertBefore(row, row.previousElementSibling);
+      if (button.dataset.moveSpec === '1' && row.nextElementSibling) editor.insertBefore(row.nextElementSibling, row);
+    });
+    $('#preset-add').addEventListener('click', () => {
+      if (editor.querySelectorAll('[data-spec-row]').length >= 128) { $('#preset-status').textContent = 'Use up to 128 fields.'; return; }
+      editor.insertAdjacentHTML('beforeend', specMarkup('', '', true));
+      editor.lastElementChild.querySelector('input').focus();
+    });
+    $('#preset-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      if (button) button.disabled = true;
+      try {
+        state.desktop_preset = await request('preset', 'POST', { version: preset.version, fields: readSpecs(editor) });
+        renderPreset();
+        $('#preset-status').textContent = 'Desktop preset saved.';
+      } catch (error) { $('#preset-status').textContent = error.message; }
+      finally { if (button) button.disabled = false; }
+    });
+  }
+
+  function editDevice(device = null, initialType = 'Laptop') {
     if (!canEdit) return;
     let pendingPhotos = () => [];
     const branchId = device ? device.location_branch_id : state.branches.find(branch => branch.name.toUpperCase() === 'APO')?.id;
@@ -246,7 +322,7 @@
     const locationOptions = (missingBranch ? `<option value="${Number(branchId)}" selected>${esc(device.location || 'Unavailable branch')}</option>` : '') +
       state.branches.map(branch => `<option value="${branch.id}"${branch.id === branchId ? ' selected' : ''}>${esc(branch.name)}</option>`).join('');
     openDialog(device ? 'Edit device' : 'Add device', 'Serial numbers and asset tags may be blank when unknown.',
-      `<div class="field-row"><label>Device type<select name="device_type">${options(types, device?.device_type || 'Laptop')}</select></label>${field('Brand / model *', 'name', device?.name, 'required')}</div>
+      `<div class="field-row"><label>Device type<select name="device_type">${options(types, device?.device_type || initialType)}</select></label>${field('Brand / model *', 'name', device?.name, 'required')}</div>
       <div class="field-row">${field('Serial number', 'serial_number', device?.serial_number)}${field('Asset tag', 'asset_tag', device?.asset_tag)}</div>
       <div class="field-row"><label>Condition<select name="device_condition">${options(conditions, device?.device_condition || 'Unknown')}</select></label><label>Location<select name="location_branch_id"><option value="">Not recorded</option>${locationOptions}</select></label></div>
       <label>Evidence photos (optional)<input id="evidence-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small>Paste an image with Ctrl+V anywhere in this form, or choose files. Up to 5 JPEG, PNG or WebP photos, 20 MiB and 40 megapixels each. Large photos are compressed before upload. Photos are saved when you select Save.</small></label><div id="evidence-selection" aria-live="polite"></div>
@@ -277,10 +353,21 @@
     pendingPhotos = InventoryPhotos.attach($('#dialog'), $('#evidence-photos'), $('#evidence-selection'), $('#form-error'), () => $('#save-dialog').disabled);
     const addSpec = (key = '', value = '') => {
       if ($('#spec-editor').querySelectorAll('[data-spec-row]').length >= 128) return;
-      $('#spec-editor').insertAdjacentHTML('beforeend', `<div class="spec-edit-row" data-spec-row><label>Specification name<input maxlength="100" value="${esc(key)}"></label><label>Value<textarea rows="2" maxlength="4000">${esc(value)}</textarea></label><button type="button" class="text-button" data-remove-spec>Remove</button></div>`);
+      $('#spec-editor').insertAdjacentHTML('beforeend', specMarkup(key, value));
     };
     for (const [key, value] of Object.entries(device?.specifications || {})) addSpec(key, value);
-    if (!device) for (const key of ['CPU', 'RAM', 'Storage', 'OS', 'LICENSE', 'MICROSOFT 365', 'ANTI VIRUS', 'SAP', 'ADOBE', 'VIBER']) addSpec(key);
+    if (!device) {
+      const drafts = new Map();
+      const selector = $('#dialog-fields select[name="device_type"]');
+      let currentType = initialType;
+      const populate = type => {
+        const fields = drafts.get(type) || (type === 'Desktop' && state.desktop_preset ? state.desktop_preset.fields : []);
+        $('#spec-editor').innerHTML = '';
+        fields.forEach(item => addSpec(item.name, item.value));
+      };
+      populate(initialType);
+      selector.addEventListener('change', () => { drafts.set(currentType, readSpecs($('#spec-editor'))); currentType = selector.value; populate(currentType); });
+    }
     $('#add-specification').addEventListener('click', () => addSpec());
     $('#spec-editor').addEventListener('click', event => { if (event.target.closest('[data-remove-spec]')) event.target.closest('[data-spec-row]').remove(); });
   }
@@ -364,7 +451,7 @@
           field('Full name *', 'name', '', 'required') + field('Job title / affiliation', 'job_title') +
           '<label>Branch<input value="Other" readonly></label>',
           async form => { await request('associate', 'POST', form); });
-      } else editDevice();
+      } else editDevice(null, view === 'preset' ? 'Desktop' : 'Laptop');
     }
     if (target.id === 'edit-device') editDevice(chosen());
     if (target.id === 'assign-device') assignDevice();
