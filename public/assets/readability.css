@@ -35,6 +35,33 @@
   .detail-meta>strong,.detail-meta>.status{max-width:100%;margin-left:auto;text-align:right;overflow-wrap:anywhere}
 }
 
+/* An icon rail expands over the workspace on hover or keyboard focus. */
+.sidebar .nav-item>.sidebar-text{font:inherit;width:auto;text-align:left;white-space:nowrap}
+.sidebar .nav-item{transition:background-color .2s ease,box-shadow .2s ease,color .2s ease}
+@media(hover:hover){
+  .sidebar .nav-item:hover{background-color:#edf5f0;color:#27694f;box-shadow:inset 0 0 0 1px #24705c18,inset 0 0 14px #24705c0d}
+}
+.sidebar-signout{display:flex;align-items:center;gap:10px}
+@media(min-width:601px){
+  .app-shell .sidebar{width:72px;padding:29px 12px;overflow:hidden;z-index:10;transition:width .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s ease}
+  .app-shell .sidebar:hover,.app-shell .sidebar:has(:focus-visible){width:240px;box-shadow:8px 0 24px #14251c14}
+  .app-shell main{margin-left:72px;width:calc(100% - 72px)}
+  .sidebar .brand{padding:0 8px;white-space:nowrap}
+  .sidebar .brand-icon{width:31px;height:31px;flex-shrink:0;margin-right:10px}
+  .sidebar .nav-item{gap:10px;padding:12px 15px}
+  .app-shell .sidebar nav{margin-top:24px;overflow-x:hidden;overflow-y:auto}
+  .sidebar .nav-item>span:first-child{width:18px;flex-shrink:0}
+  .sidebar .sidebar-text,.sidebar .nav-item b{opacity:0;visibility:hidden;transition:opacity .18s ease,visibility .18s ease}
+  .sidebar:hover .sidebar-text,.sidebar:has(:focus-visible) .sidebar-text,.sidebar:hover .nav-item b,.sidebar:has(:focus-visible) .nav-item b{opacity:1;visibility:visible;transition-delay:.08s}
+  .sidebar .profile{padding-left:8px;white-space:nowrap}
+  .sidebar .avatar{flex-shrink:0}
+  .sidebar .sidebar-signout{padding-left:15px;white-space:nowrap}
+  .sidebar-signout>span:first-child{width:18px;flex-shrink:0;font-size:18px}
+}
+@media(prefers-reduced-motion:reduce){
+  .app-shell .sidebar,.sidebar .nav-item,.sidebar .sidebar-text,.sidebar .nav-item b{transition:none!important}
+}
+
 /* The workspace stays in the viewport; its content panes own scrolling. */
 html,body{height:100%;overflow:hidden}
 .app-shell{height:100dvh;min-height:0;overflow:hidden}

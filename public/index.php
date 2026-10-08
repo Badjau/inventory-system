@@ -38,17 +38,17 @@ if (!$user) {
 <body data-role="<?= $user['role'] ?>">
 <div class="app-shell">
   <aside class="sidebar">
-    <div class="brand"><span class="brand-icon">▦</span>inventory</div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">▦</span><span class="sidebar-text">inventory</span></div>
     <nav aria-label="Workspace" id="navigation">
-      <button class="nav-item active" data-view="devices"><span>▦</span>Devices <b id="count-devices">0</b></button>
-      <button class="nav-item" data-view="people"><span>♙</span>People <b id="count-people">0</b></button>
-      <button class="nav-item" data-view="shared"><span>▤</span>Shared devices <b id="count-shared">0</b></button>
-      <button class="nav-item" data-view="attention"><span>⚑</span>Needs attention <b id="count-attention">0</b></button>
-      <button class="nav-item" data-view="activity"><span>◷</span>Activity</button>
-      <button class="nav-item" data-view="preset"><span>≡</span>Preset</button>
+      <button class="nav-item active" data-view="devices" aria-label="Devices"><span aria-hidden="true">▦</span><span class="sidebar-text">Devices</span><b id="count-devices">0</b></button>
+      <button class="nav-item" data-view="people" aria-label="People"><span aria-hidden="true">♙</span><span class="sidebar-text">People</span><b id="count-people">0</b></button>
+      <button class="nav-item" data-view="shared" aria-label="Shared devices"><span aria-hidden="true">▤</span><span class="sidebar-text">Shared devices</span><b id="count-shared">0</b></button>
+      <button class="nav-item" data-view="attention" aria-label="Needs attention"><span aria-hidden="true">⚑</span><span class="sidebar-text">Needs attention</span><b id="count-attention">0</b></button>
+      <button class="nav-item" data-view="activity" aria-label="Activity"><span aria-hidden="true">◷</span><span class="sidebar-text">Activity</span></button>
+      <button class="nav-item" data-view="preset" aria-label="Preset"><span aria-hidden="true">≡</span><span class="sidebar-text">Preset</span></button>
     </nav>
-    <div class="sidebar-bottom"><div class="profile"><span class="avatar">IT</span><div><?= htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') ?><small><?= $user['role'] === 'editor' ? 'Editor' : 'Read-only' ?></small></div></div>
-      <form action="login.php" method="post"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8') ?>"><button class="text-button" name="logout" value="1">Sign out</button></form>
+    <div class="sidebar-bottom"><div class="profile"><span class="avatar">IT</span><div class="sidebar-text"><?= htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') ?><small><?= $user['role'] === 'editor' ? 'Editor' : 'Read-only' ?></small></div></div>
+      <form action="login.php" method="post"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8') ?>"><button class="text-button sidebar-signout" name="logout" value="1" aria-label="Sign out"><span aria-hidden="true">↪</span><span class="sidebar-text">Sign out</span></button></form>
     </div>
   </aside>
   <main>

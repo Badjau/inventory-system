@@ -133,7 +133,7 @@
       return;
     }
     const filteredEmployee = people().find(employee => Number(employee.id) === Number(employeeFilter));
-    $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users stay in inventory only.' :
+    $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users do not get reflected onto HR dashboard.' :
       view === 'activity' ? 'The latest 100 inventory changes. Select a device to see its full history.' :
       filteredEmployee ? `Equipment assigned to ${filteredEmployee.name}.` : 'Equipment and the people who hold it.';
     $('#search').placeholder = view === 'people' ? 'Search name, employee number, branch, department, or role…' :
