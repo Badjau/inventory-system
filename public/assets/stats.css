@@ -1,0 +1,4 @@
+.stat-action{width:100%;text-align:left;font:inherit;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
+.stat-action:hover,.stat-action.active{border-color:var(--green)}
+.stat-action.active{background:#f1f7f3}
+.stat-action:focus-visible{outline:2px solid var(--green);outline-offset:3px}

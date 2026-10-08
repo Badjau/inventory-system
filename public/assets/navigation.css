@@ -1,0 +1,4 @@
+@media(min-width:601px){
+  .nav-item{gap:8px;padding-left:10px;padding-right:10px}
+  .nav-item b{flex-shrink:0}
+}

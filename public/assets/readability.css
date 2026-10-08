@@ -1,0 +1,28 @@
+@media(min-width:1500px){
+  body{font-size:14px}
+  .sidebar{width:240px;padding-left:20px;padding-right:20px}
+  main{margin-left:240px;width:calc(100% - 240px)}
+  .topbar{padding-left:40px;padding-right:40px}
+  .page-content{padding:40px 40px 52px}
+  h1{font-size:32px}
+  .page-heading p{font-size:13px}
+  .button{font-size:12px}
+  .stats{gap:18px}
+  .stat{padding:20px 22px}
+  .stat>span{font-size:12px}
+  .stat small{font-size:11px}
+  .toolbar{gap:11px}
+  .toolbar select{max-width:230px}
+  .search input{font-size:12px}
+  .inventory-layout{grid-template-columns:minmax(0,1fr) 340px;gap:24px}
+  th{font-size:10px}
+  td{font-size:12px}
+  .detail-panel{padding:24px}
+  .detail-panel h2{font-size:19px}
+  .detail-type,.detail-meta{font-size:11px}
+  .detail-section h3{font-size:12px}
+  .detail-section p{font-size:12px}
+  .detail-meta{flex-wrap:wrap;gap:8px 16px}
+  .detail-meta>span:first-child{flex:0 0 auto}
+  .detail-meta>strong,.detail-meta>.status{max-width:100%;margin-left:auto;text-align:right;overflow-wrap:anywhere}
+}

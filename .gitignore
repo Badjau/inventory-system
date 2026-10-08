@@ -1,0 +1,7 @@
+/config.local.php
+*.local.json
+/.scratch/
+/storage/*.json
+/storage/*.log
+/storage/*.xlsx
+/~$*
