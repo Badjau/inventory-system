@@ -61,7 +61,34 @@ final class EvidencePhotos
             if (preg_match('/^[a-f0-9]{32}\.(jpg|png|webp)$/D', $photo['file'] ?? '')) {
                 $path = self::directory() . '/' . $photo['file'];
                 if (is_file($path)) unlink($path);
+                if (is_file($path . '.thumb96.jpg')) unlink($path . '.thumb96.jpg');
             }
+        }
+    }
+
+    public static function thumbnail(string $path): string
+    {
+        $cached = $path . '.thumb96.jpg';
+        if (is_file($cached)) return $cached;
+        if (!extension_loaded('gd')) throw new ValidationException('Enable PHP GD to display device thumbnails.', 503);
+        $source = @imagecreatefromstring(file_get_contents($path));
+        if (!$source) throw new ValidationException('Photo cannot be decoded.', 422);
+        $thumbnail = imagecreatetruecolor(96, 96);
+        $temporary = null;
+        try {
+            imagefill($thumbnail, 0, 0, imagecolorallocate($thumbnail, 255, 255, 255));
+            $width = imagesx($source);
+            $height = imagesy($source);
+            $side = min($width, $height);
+            imagecopyresampled($thumbnail, $source, 0, 0, (int) (($width - $side) / 2), (int) (($height - $side) / 2), 96, 96, $side, $side);
+            $temporary = tempnam(dirname($path), 'thumb-');
+            if ($temporary === false || !imagejpeg($thumbnail, $temporary, 72)) throw new \RuntimeException('Cannot create thumbnail.');
+            if (!@rename($temporary, $cached) && !is_file($cached)) throw new \RuntimeException('Cannot cache thumbnail.');
+            return $cached;
+        } finally {
+            imagedestroy($source);
+            imagedestroy($thumbnail);
+            if (is_string($temporary) && is_file($temporary)) unlink($temporary);
         }
     }
 }

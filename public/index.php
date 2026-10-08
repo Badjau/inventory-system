@@ -30,6 +30,8 @@ if (!$user) {
   <link rel="stylesheet" href="assets/navigation.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/navigation.css'), 0, 12) ?>">
   <link rel="stylesheet" href="assets/readability.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/readability.css'), 0, 12) ?>">
   <script src="assets/model.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/model.js'), 0, 12) ?>" defer></script>
+  <script src="assets/photos.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photos.js'), 0, 12) ?>" defer></script>
+  <script src="assets/photo-viewer.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photo-viewer.js'), 0, 12) ?>" defer></script>
   <script src="assets/app.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/app.js'), 0, 12) ?>" defer></script>
   <script src="assets/import.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/import.js'), 0, 12) ?>" defer></script>
 </head>
@@ -40,8 +42,8 @@ if (!$user) {
     <nav aria-label="Workspace" id="navigation">
       <button class="nav-item active" data-view="devices"><span>▦</span>Devices <b id="count-devices">0</b></button>
       <button class="nav-item" data-view="people"><span>♙</span>People <b id="count-people">0</b></button>
-      <button class="nav-item" data-view="shared"><span>▤</span>Shared equipment <b id="count-shared">0</b></button>
-      <button class="nav-item" data-view="attention"><span>⚑</span>Needs attention</button>
+      <button class="nav-item" data-view="shared"><span>▤</span>Shared devices <b id="count-shared">0</b></button>
+      <button class="nav-item" data-view="attention"><span>⚑</span>Needs attention <b id="count-attention">0</b></button>
       <button class="nav-item" data-view="activity"><span>◷</span>Activity</button>
     </nav>
     <div class="sidebar-bottom"><div class="profile"><span class="avatar">IT</span><div><?= htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') ?><small><?= $user['role'] === 'editor' ? 'Editor' : 'Read-only' ?></small></div></div>
@@ -49,9 +51,8 @@ if (!$user) {
     </div>
   </aside>
   <main>
-    <header class="topbar"><span>Workspace <span class="slash">/</span><strong id="breadcrumb">Devices</strong></span><button class="button" id="refresh">Refresh</button></header>
     <div class="page-content">
-      <div class="page-heading"><div><h1 id="page-title">Devices</h1><p id="page-description">Equipment and the people who hold it.</p></div><div class="action-row"><button class="button" id="import-excel">Import Excel</button><a class="button" href="api.php?action=export">Export Excel</a><button class="button primary" id="add-device" disabled>＋ Add device</button></div></div>
+      <div class="page-heading"><div><h1 id="page-title">Devices</h1><p id="page-description">Equipment and the people who hold it.</p></div><div class="action-row"><button class="button" id="refresh">Refresh</button><button class="button" id="import-excel">Import Excel</button><a class="button" href="api.php?action=export">Export Excel</a><button class="button primary" id="add-device" disabled>＋ Add device</button></div></div>
       <div id="notice" role="status" hidden></div>
       <div id="error" role="alert" hidden></div>
       <div id="stats" class="stats"></div>
@@ -68,7 +69,7 @@ if (!$user) {
           <div class="table-scroll"><table id="directory-table"><thead id="table-head"></thead><tbody id="table-body"><tr><td class="empty-state">Loading inventory…</td></tr></tbody></table></div>
           <div class="table-footer"><span id="table-footer"></span><button id="clear-person" class="text-button" hidden>Clear employee filter</button></div>
         </section>
-        <aside id="detail" class="detail-panel" aria-label="Device details"><p class="empty-state">Select a device to view its details.</p></aside>
+        <aside id="detail" class="detail-panel" aria-label="Device details" hidden></aside>
       </div>
     </div>
   </main>
@@ -81,6 +82,11 @@ if (!$user) {
   </form>
 </dialog>
 <noscript><p>Enable JavaScript to use inventory.</p></noscript>
+<dialog id="photo-viewer" class="photo-viewer" aria-labelledby="photo-viewer-title">
+  <header class="photo-viewer-header"><h2 id="photo-viewer-title">Evidence photo</h2><button type="button" class="close-button" id="close-photo-viewer" aria-label="Close photo viewer">×</button></header>
+  <small class="photo-viewer-hint" id="photo-viewer-hint">Click to zoom · Click again to fit · Drag to move</small>
+  <div id="photo-stage" class="photo-stage" tabindex="0" aria-label="Photo viewer" aria-describedby="photo-viewer-hint"><img id="photo-image" alt="" draggable="false" hidden><p id="photo-viewer-status" role="status">Loading photo…</p></div>
+</dialog>
 <dialog id="import-dialog" class="modal import-modal" aria-labelledby="import-title">
   <form id="import-form">
     <div class="modal-header"><div><h2 id="import-title">Import Excel</h2><p>Review holders and approve their devices together.</p></div><button type="button" class="close-button" id="close-import" aria-label="Close import">×</button></div>

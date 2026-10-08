@@ -16,10 +16,19 @@
   };
   function filterDevices(devices, filter) {
     const query = (filter.query || '').trim().toLocaleLowerCase();
+    const normalizeSpec = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+    const colon = query.indexOf(':');
+    const specName = colon > 0 ? normalizeSpec(query.slice(0, colon)) : '';
+    const specValue = colon > 0 ? normalizeSpec(query.slice(colon + 1)) : '';
+    // Recognize complete spec labels; raw identifiers such as MAC addresses retain ordinary search.
+    const specSearch = specName && devices.some(device => Object.keys(device.specifications || {}).some(name => normalizeSpec(name) === specName));
     return devices.filter(device => {
       const text = [device.id, device.name, device.device_type, device.serial_number, device.asset_tag,
         device.holder_name, device.department, device.branch, device.job_title].join(' ').toLocaleLowerCase();
-      return (!query || text.includes(query)) && (!filter.type || device.device_type === filter.type) &&
+      const matchesQuery = !query || (specSearch
+        ? Object.entries(device.specifications || {}).some(([name, value]) => normalizeSpec(name) === specName && normalizeSpec(value) !== '' && normalizeSpec(value).includes(specValue))
+        : text.includes(query));
+      return matchesQuery && (!filter.type || device.device_type === filter.type) &&
         (!filter.department || device.department === filter.department) &&
         (!filter.branch || device.branch === filter.branch) &&
         (!filter.employee || (Number(filter.employee) < 0

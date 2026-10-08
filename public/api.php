@@ -14,7 +14,7 @@ try {
     $action = $_GET['action'] ?? 'state';
     $method = $_SERVER['REQUEST_METHOD'];
     $getActions = ['state', 'history', 'export', 'evidence'];
-    $postActions = ['associate', 'device', 'assignment', 'note', 'import-preview', 'import-apply'];
+    $postActions = ['associate', 'device', 'assignment', 'note', 'photo-remove', 'import-preview', 'import-apply'];
     if (!is_string($action) || !in_array($action, [...$getActions, ...$postActions], true)) {
         throw new ValidationException('Endpoint not found.', 404);
     }
@@ -23,7 +23,8 @@ try {
         header('Allow: ' . $expected);
         throw new ValidationException('Method not allowed.', 405);
     }
-    Inventory\Auth::authorize(Inventory\Auth::current(), $method === 'POST');
+    $user = Inventory\Auth::current();
+    Inventory\Auth::authorize($user, $method === 'POST');
     $multipartDevice = $action === 'device' && str_starts_with(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data');
     $input = $method === 'POST' && $action !== 'import-preview' && !$multipartDevice ? Http::input() : [];
     if ($multipartDevice) {
@@ -35,7 +36,7 @@ try {
         if (!is_array($input) || !str_starts_with(ltrim($payload), '{')) throw new ValidationException('Send a device object.');
     }
     $db = Database::connect(inventory_config()['database']);
-    $service = new InventoryService($db);
+    $service = new InventoryService($db, $user);
     $hr = new HrDirectory($db);
     if ($action === 'evidence') {
         $eventId = InventoryService::positiveInt($_GET['event'] ?? null, 'event ID');
@@ -48,6 +49,20 @@ try {
         if (!$photo || !preg_match('/^[a-f0-9]{32}\.(jpg|png|webp)$/D', $photo['file'] ?? '')) throw new ValidationException('Photo not found.', 404);
         $path = Inventory\EvidencePhotos::directory() . '/' . $photo['file'];
         if (!is_file($path)) throw new ValidationException('Photo not found.', 404);
+        if (($_GET['thumbnail'] ?? '') === '1') {
+            $path = Inventory\EvidencePhotos::thumbnail($path);
+            // Revalidate through authentication on every request; reuse image bytes on 304.
+            $etag = '"' . hash('sha256', $photo['file'] . ':thumb96-v1') . '"';
+            header('Cache-Control: private, max-age=0, must-revalidate');
+            header('ETag: ' . $etag);
+            session_write_close();
+            if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) { http_response_code(304); exit; }
+            header('Content-Type: image/jpeg');
+            header('Content-Disposition: inline; filename="thumbnail.jpg"');
+            header('Content-Length: ' . filesize($path));
+            readfile($path);
+            exit;
+        }
         header('Content-Type: ' . $photo['mime']);
         header('Content-Disposition: inline; filename="evidence.' . pathinfo($path, PATHINFO_EXTENSION) . '"');
         header('Content-Length: ' . filesize($path));
@@ -104,11 +119,12 @@ try {
         Http::json(['data' => $result]);
     }
     $data = match ($action) {
-        'state' => ['devices' => array_map($departmentNames->display(...), $service->devices()),
+        'state' => ['devices' => array_map($departmentNames->display(...), $service->devices(true)),
             'employees' => $hr->all(), 'associates' => (new Inventory\Associates($db))->all(), 'departments' => $departments, 'branches' => $hr->branches(), 'activity' => $service->history()],
         'associate' => (new Inventory\Associates($db))->add($input),
         'history' => $service->history(InventoryService::positiveInt($_GET['id'] ?? null, 'device ID')),
         'assignment' => $service->assign($input, $hr),
+        'photo-remove' => $service->removePhoto($input),
         'note' => (static function () use ($service, $input): array { $service->note($input); return ['saved' => true]; })(),
     };
     Http::json(['data' => $data]);

@@ -1,3 +1,11 @@
+.page-heading>div:first-child{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 16px;min-width:0}
+.page-heading #page-title{font-size:23px;line-height:1.3;letter-spacing:-.5px;flex-shrink:0}
+.page-heading #page-description{margin:0;max-width:none;line-height:1.5}
+.page-heading .action-row{flex-shrink:0}
+@media(max-width:600px){
+  .page-heading>div:first-child{gap:4px 12px}
+  .page-heading #page-title{font-size:21px}
+}
 @media(min-width:1500px){
   body{font-size:14px}
   .sidebar{width:240px;padding-left:20px;padding-right:20px}
@@ -25,4 +33,80 @@
   .detail-meta{flex-wrap:wrap;gap:8px 16px}
   .detail-meta>span:first-child{flex:0 0 auto}
   .detail-meta>strong,.detail-meta>.status{max-width:100%;margin-left:auto;text-align:right;overflow-wrap:anywhere}
+}
+
+/* The workspace stays in the viewport; its content panes own scrolling. */
+html,body{height:100%;overflow:hidden}
+.app-shell{height:100dvh;min-height:0;overflow:hidden}
+.app-shell main{height:100%;min-height:0;overflow:hidden}
+.page-content{height:100%;min-height:0;display:flex;flex-direction:column;padding:20px 24px;overflow:hidden}
+.page-heading{flex-shrink:0;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.page-content #stats{flex-shrink:0;gap:10px;margin-bottom:14px}
+.page-content .stat{padding:10px 14px}
+.page-content .stat>span{font-size:11px}
+.page-content .stat>strong{font-size:23px;margin:5px 0 3px}
+.page-content .stat small{font-size:10px;line-height:1.4}
+.page-content #error,.page-content #notice{flex-shrink:0;margin-bottom:10px;max-height:15dvh;overflow:auto}
+.page-content .inventory-layout{flex:1;min-height:0;align-items:stretch;grid-template-columns:minmax(0,1fr)}
+.page-content .inventory-layout.drawer-open{grid-template-columns:minmax(240px,.8fr) minmax(0,2fr)}
+.inventory-layout .inventory-panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.inventory-panel .toolbar,.inventory-panel .table-footer{flex-shrink:0}
+.inventory-panel .toolbar{padding:10px;gap:6px;max-height:35%;overflow:auto}
+.inventory-panel .table-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.inventory-panel thead{position:sticky;top:0;z-index:1}
+.page-content .drawer-open .detail-panel{display:flex;flex-direction:column;position:static;min-height:0;max-height:none;overflow:hidden;padding:0}
+.detail-panel .drawer-header,.detail-panel .drawer-actions{flex-shrink:0;position:static;padding:14px 18px}
+.detail-panel .drawer-header h2{font-size:19px}
+.detail-panel .drawer-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 18px 14px;scrollbar-gutter:stable}
+.drawer-content #device-photos{max-height:28dvh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:6px}
+.drawer-content .specs,.drawer-content .history-list{max-height:none;overflow:visible}
+.drawer-content .serial-card{margin-top:14px}
+.sidebar nav{min-height:0;overflow:auto}
+.sidebar .sidebar-bottom{flex-shrink:0}
+
+/* Larger inventory text at normal browser zoom. */
+.inventory-panel th{font-size:11px;line-height:1.5}
+.inventory-panel td{font-size:13px;line-height:1.5}
+.inventory-panel td small,.inventory-panel .device-cell small,.inventory-panel .person-cell small{font-size:12px}
+.inventory-panel .status{font-size:11px}
+.inventory-panel .button,.inventory-panel .text-button,.inventory-panel .search input{font-size:13px}
+.inventory-panel .table-footer{font-size:12px}
+.inventory-panel .empty-state{font-size:14px}
+.detail-panel{font-size:15px}
+.detail-panel .drawer-header h2{font-size:23px}
+.detail-panel .detail-top{font-size:11px}
+.detail-panel .detail-type,.detail-panel .detail-meta{font-size:12px;line-height:1.6}
+.detail-panel .detail-section h3{font-size:14px}
+.detail-panel .detail-section p{font-size:15px}
+.detail-panel small,.detail-panel .source-hint,.detail-panel .assignment-hint{font-size:12px;line-height:1.6}
+.detail-panel .serial-card>span{font-size:11px}
+.detail-panel .serial-card>strong{font-size:13px}
+.detail-panel .specs span{font-size:11px;line-height:1.5}
+.detail-panel .specs strong{font-size:13px;line-height:1.6}
+.detail-panel .timeline-item,.detail-panel .timeline-item strong{font-size:13px;line-height:1.6}
+.detail-panel .timeline-item small{font-size:11px}
+.detail-panel .status{font-size:11px}
+.detail-panel .button,.detail-panel .text-button{font-size:13px}
+@media(min-width:1500px){
+  .inventory-panel th{font-size:12px}
+  .inventory-panel td{font-size:14px}
+  .detail-panel .specs span,.detail-panel .detail-meta{font-size:13px}
+}
+@media(max-width:700px){
+  .page-content{padding:12px 14px}
+  .page-content .inventory-layout.drawer-open{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,3fr) minmax(0,2fr);gap:10px}
+  .drawer-open .detail-panel{grid-row:1}
+  .drawer-open .inventory-panel{grid-row:2}
+  .page-content #stats{gap:6px;margin-bottom:10px;grid-template-columns:repeat(4,minmax(0,1fr))}
+  .page-content .stat{padding:8px}
+  .page-content .stat>span{font-size:10px}
+  .page-content .stat>strong{font-size:20px}
+  .page-content .stat small{display:none}
+}
+@media(max-width:600px){
+  .app-shell{display:flex;flex-direction:column}
+  .app-shell .sidebar{flex-shrink:0;padding:10px 14px}
+  .sidebar .brand{font-size:19px}
+  .sidebar nav{margin-top:8px}
+  .app-shell main{flex:1;width:100%;margin:0;min-height:0}
 }

@@ -301,7 +301,7 @@ try {
     check($service->normalizeDepartments($departmentNames)['updated'] === 0, 'Inventory department cleanup is idempotent');
     check($service->device(1)['source'] === $sourceBeforeDepartmentCleanup, 'Department cleanup preserves original source snapshots');
     $sharedDevice = $service->assign(['id' => $id, 'version' => $service->device($id)['version'], 'holder_kind' => 'shared', 'department_id' => 1], $hr);
-    check($sharedDevice['department'] === 'Accounting' && $sharedDevice['department_id'] === 1, 'Shared equipment uses an HR department ID');
+    check($sharedDevice['department'] === 'Accounting' && $sharedDevice['department_id'] === 1, 'Shared devices uses an HR department ID');
     rejects(static fn () => $service->assign(['id' => $id, 'version' => $sharedDevice['version'], 'holder_kind' => 'shared', 'department_id' => 9999], $hr));
     rejects(static fn () => $service->assign(['id' => $id, 'version' => $sharedDevice['version'], 'holder_kind' => 'shared', 'department' => 'Made-up department'], $hr));
     $db->exec("UPDATE inv_devices SET department = 'hr', department_id = NULL WHERE id = 1");
@@ -399,6 +399,8 @@ try {
     rejects(static fn () => InventoryService::positiveInt(true, 'device ID'));
     rejects(static fn () => InventoryService::positiveInt(1.5, 'device ID'));
     require __DIR__ . '/evidence.php';
+    require __DIR__ . '/photo-removal.php';
+    require __DIR__ . '/actors.php';
     echo "PASS: $assertions assertions (" . ($mysql ? 'MySQL' : 'isolated SQLite fixture') . ").\n";
 } catch (Throwable $error) {
     fwrite(STDERR, 'FAIL: ' . $error->getMessage() . PHP_EOL . $error->getTraceAsString() . PHP_EOL);

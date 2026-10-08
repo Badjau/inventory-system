@@ -13,6 +13,24 @@ assert.equal(filterDevices([current], { branch: 'Other' }).length, 0);
 assert.equal(filterDevices([current], { view: 'attention' }).length, 0);
 assert.equal(filterDevices([{ ...current, holder_kind: 'unassigned' }], { status: 'available' }).length, 1);
 assert.equal(displayDevice({ holder_kind: 'imported', holder_name: 'Workbook holder', location_branch_id: 3, location: 'Old name' }, [], [{ id: 3, name: 'APO' }]).location, 'APO');
+const specRows = [
+  { ...current, id: 20, specifications: { RAM: '16GB DDR4', OS: 'Windows 11 Pro', 'MAC address': '38-D5-47-20-0E-6C', 'Microsoft 365': 'Premium', Notes: 'Line one\nLine two' } },
+  { ...current, id: 21, specifications: { RAM: '8GB', OS: 'Windows 10', 'Microsoft 365': '' } },
+  { ...current, id: 22, serial_number: '38:D5:47:20:0E:6C', specifications: { PROGRAM: '16GB' } },
+  { ...current, id: 23 }
+];
+assert.equal(filterDevices(specRows, { query: 'RAM: 16GB' })[0].id, 20);
+assert.equal(filterDevices(specRows, { query: 'RAM: 16GB' }).length, 1);
+assert.equal(filterDevices(specRows, { query: '  ram :   16gb  ' }).length, 1);
+assert.equal(filterDevices(specRows, { query: 'OS: Windows 11' })[0].id, 20);
+assert.equal(filterDevices(specRows, { query: ' MICROSOFT   365: prem ' })[0].id, 20);
+assert.equal(filterDevices(specRows, { query: 'Notes: line one line two' })[0].id, 20);
+assert.equal(filterDevices(specRows, { query: 'Microsoft 365:' }).length, 1);
+assert.equal(filterDevices(specRows, { query: 'MAC address: 38-D5' })[0].id, 20);
+assert.equal(filterDevices(specRows, { query: 'RAM: 32GB' }).length, 0);
+assert.equal(filterDevices(specRows, { query: 'RAM: 16GB', branch: 'Other' }).length, 0);
+assert.equal(filterDevices(specRows, { query: '38:D5:47' })[0].id, 22);
+assert.equal(filterDevices(specRows, { query: 'Acer' }).length, 4);
 console.log('PASS: frontend escaping, HR display, and inventory filters.');
 const reviewGroups = [{ id: 1, label: 'First name', records: [{ name: 'Desktop' }], conflict: false },
   { id: 2, label: 'Second name', records: [{ name: 'Laptop' }], conflict: false }];
@@ -34,12 +52,27 @@ async function startupSmoke(role = 'editor') {
   assert.equal(app.includes('holder-links'), false);
   const elements = new Map();
   const listeners = {};
+  const thumbnails = [];
+  const observers = [];
+  class TestObserver {
+    constructor(callback) { this.callback = callback; this.targets = []; observers.push(this); }
+    observe(image) { this.targets.push(image); }
+    unobserve(image) { this.targets = this.targets.filter(target => target !== image); }
+    disconnect() { this.targets = []; }
+  }
   function addElements(markup) {
     for (const match of markup.matchAll(/id="([^"]+)"/g)) {
       if (elements.has(match[1])) continue;
       elements.set(match[1], { textContent: '', value: '', hidden: false, disabled: false, files: [],
         showModal() { this.open = true; }, close() { this.open = false; },
-        classList: { toggle() {} }, querySelectorAll: () => [],
+        classList: { toggle() {} }, querySelectorAll(selector) {
+          if (selector !== '[data-thumbnail]') return [];
+          return [...this.innerHTML.matchAll(/data-thumbnail="([^"]+)"/g)].map(match => {
+            const image = { dataset: { thumbnail: match[1] }, classList: { add() {} }, addEventListener() {}, remove() {} };
+            thumbnails.push(image);
+            return image;
+          });
+        },
         addEventListener(type, handler) { listeners[match[1] + ':' + type] = handler; },
         set innerHTML(value) { this.markup = value; addElements(value); },
         get innerHTML() { return this.markup || ''; } });
@@ -53,17 +86,51 @@ async function startupSmoke(role = 'editor') {
   };
   const devices = [
     { id: 1, name: 'Recorded holder laptop', device_type: 'Laptop', holder_kind: 'imported', holder_name: 'Recorded holder',
-      device_condition: 'Good', specifications: {} },
+      device_condition: 'Good', specifications: {}, photo_event_id: 7 },
     { id: 2, name: 'Unassigned mouse', device_type: 'Mouse', holder_kind: 'unassigned', device_condition: 'Good', specifications: {} },
     { id: 3, name: 'Faulty monitor', device_type: 'Monitor', holder_kind: 'unassigned', device_condition: 'Faulty', specifications: {} }
   ];
-  const fetch = async url => ({ ok: true, json: async () => ({ data: url.includes('action=history') ? [] :
-    { devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [] } }) });
-  new Function('document', 'InventoryModel', 'fetch', app)(document, require('../public/assets/model.js'), fetch);
+  const fetch = async url => ({ ok: true, json: async () => ({ data: url.includes('action=history') ? (url.endsWith('id=2') ? [
+    { id: 9, message: 'Uploaded photos', photos: [{ name: 'Removed.jpg' }, { name: 'Kept.jpg' }], removed_photo_indexes: [0] }
+  ] : []) :
+    { devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [
+      { device_id: 1, message: 'Device edited', actor: { id: 1, name: '<Admin>', username: 'audit-user' } },
+      { device_id: 2, message: 'Legacy edit', actor: null }
+    ] } }) });
+  new Function('document', 'InventoryModel', 'fetch', 'IntersectionObserver', app)(document, require('../public/assets/model.js'), fetch, TestObserver);
   for (let i = 0; i < 10; i++) await Promise.resolve();
   assert.equal(elements.get('add-device').disabled, role === 'viewer');
   assert.equal(elements.get('stats').innerHTML.match(/data-stat=/g).length, 4);
   assert.equal(elements.get('table-body').innerHTML.includes('Recorded holder laptop'), true);
+  assert.equal(thumbnails[0].src, undefined);
+  const portraitObserver = observers[observers.length - 1];
+  portraitObserver.callback([{ target: thumbnails[0], isIntersecting: false }]);
+  assert.equal(thumbnails[0].src, undefined);
+  portraitObserver.callback([{ target: thumbnails[0], isIntersecting: true }]);
+  assert.equal(thumbnails[0].src.includes('event=7'), true);
+  assert.equal(thumbnails[0].src.includes('thumbnail=1'), true);
+  assert.equal(portraitObserver.targets.length, 0);
+  assert.equal(elements.get('detail').hidden, true);
+  listeners['document:click']({ target: { closest: () => ({ dataset: { device: '1' } }) } });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.equal(elements.get('detail').hidden, false);
+  assert.equal(elements.get('detail').innerHTML.includes('Current assignment'), true);
+  assert.equal(elements.get('detail').innerHTML.includes('Evidence photos'), true);
+  assert.equal(elements.get('device-photos').innerHTML.includes('No current photos'), true);
+  listeners['document:click']({ target: { closest: () => ({ id: 'close-detail', dataset: {} }) } });
+  assert.equal(elements.get('detail').hidden, true);
+  listeners['document:click']({ target: { closest: () => ({ dataset: { device: '2' } }) } });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.equal(elements.get('device-photos').innerHTML.includes('Removed.jpg'), false);
+  assert.equal(elements.get('device-photos').innerHTML.includes('Kept.jpg'), true);
+  assert.equal(elements.get('device-photos').innerHTML.includes('data-remove-photo="1"'), role !== 'viewer');
+  assert.equal(elements.get('device-photos').innerHTML.includes('data-remove-photo="0"'), false);
+  assert.equal(elements.get('history').innerHTML.includes('Removed.jpg'), true);
+  assert.equal(elements.get('history').innerHTML.includes('retained in history'), true);
+  let escaped = false;
+  listeners['document:keydown']({ key: 'Escape', preventDefault() { escaped = true; } });
+  assert.equal(escaped, true);
+  assert.equal(elements.get('detail').hidden, true);
   listeners['document:click']({ target: { closest: () => ({ dataset: { stat: 'available' } }) } });
   assert.equal(elements.get('table-body').innerHTML.includes('Unassigned mouse'), true);
   assert.equal(elements.get('table-body').innerHTML.includes('Recorded holder laptop'), false);
@@ -78,6 +145,14 @@ async function startupSmoke(role = 'editor') {
   assert.equal(elements.get('add-device').textContent, '＋ Add device');
   assert.equal(elements.get('table-body').innerHTML.includes('Recorded holder laptop'), false);
   console.log('PASS: app startup, removed Holder Review, and summary card views.');
+  listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'activity' } }) } });
+  assert.equal(elements.get('table-head').innerHTML.includes('Changed by'), true);
+  assert.equal(elements.get('table-body').innerHTML.includes('&lt;Admin&gt;'), true);
+  assert.equal(elements.get('table-body').innerHTML.includes('Not recorded'), true);
+  elements.get('search').value = 'AUDIT-USER';
+  listeners['search:input']();
+  assert.equal(elements.get('table-body').innerHTML.includes('Device edited'), true);
+  assert.equal(elements.get('table-body').innerHTML.includes('Legacy edit'), false);
   const importApp = readFileSync(__dirname + '/../public/assets/import.js', 'utf8');
   const requests = [];
   const source = { sheet: 'PC', row: 2 };

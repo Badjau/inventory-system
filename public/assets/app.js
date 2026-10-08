@@ -5,7 +5,7 @@
   const { escape: esc, attention, displayDevice, filterDevices } = InventoryModel;
   const types = ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other'];
   const conditions = ['Good', 'Needs attention', 'Faulty', 'Unknown'];
-  const titles = { devices: 'Devices', people: 'People', shared: 'Shared equipment', attention: 'Needs attention', activity: 'Activity' };
+  const titles = { devices: 'Devices', people: 'People', shared: 'Shared devices', attention: 'Needs attention', activity: 'Activity' };
   let state = { devices: [], employees: [], branches: [], departments: [], activity: [] };
   let view = 'devices', selected = null, employeeFilter = null, submitHandler = null, loading = false;
   let historyRequest = 0;
@@ -21,6 +21,27 @@
     Other: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 2.5 9 5v9l-9 5-9-5v-9zM3.5 7.8 12 12.5l8.5-4.7M12 12.5v9"/><path d="m8 5 8.5 4.7"/></svg>'
   };
   const icon = type => icons[type] || icons.Other;
+  const portrait = device => `${icon(device.device_type)}${device.photo_event_id ? `<img class="device-portrait" data-thumbnail="api.php?action=evidence&amp;event=${Number(device.photo_event_id)}&amp;photo=${Number(device.photo_index || 0)}&amp;thumbnail=1" width="96" height="96" alt="" loading="lazy" decoding="async" fetchpriority="low">` : ''}`;
+  let thumbnailObserver = null;
+  function observeThumbnails() {
+    thumbnailObserver?.disconnect();
+    thumbnailObserver = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const image = entry.target;
+        image.src = image.dataset.thumbnail;
+        thumbnailObserver.unobserve(image);
+      });
+    }, { rootMargin: '80px', threshold: 0.01 });
+    for (const container of [$('#table-body'), $('#detail')]) {
+      container.querySelectorAll('[data-thumbnail]').forEach(image => {
+        image.addEventListener('load', () => image.classList.add('loaded'), { once: true });
+        image.addEventListener('error', () => image.remove(), { once: true });
+        if (thumbnailObserver) thumbnailObserver.observe(image);
+        else image.src = image.dataset.thumbnail;
+      });
+    }
+  }
   const status = device => device.holder_kind === 'unassigned' ? 'Available' : 'Assigned';
   const badge = device => `<span class="status ${device.holder_kind === 'unassigned' ? 'available' : 'assigned'}">${status(device)}</span>`;
   const conditionBadge = device => `<span class="status ${attention(device) ? 'repair' : device.device_condition === 'Good' ? 'available' : 'unknown'}">${esc(device.device_condition)}</span>`;
@@ -81,6 +102,7 @@
     $('#count-devices').textContent = rows.length;
     $('#count-people').textContent = people().length;
     $('#count-shared').textContent = rows.filter(device => device.holder_kind === 'shared').length;
+    $('#count-attention').textContent = rows.filter(attention).length;
     const cards = [
       ['total', 'Total devices', rows.length, 'Individual inventory items'],
       ['assigned', 'Assigned', rows.filter(device => device.holder_kind !== 'unassigned').length, 'People and shared departments'],
@@ -93,19 +115,23 @@
   }
 
   function render() {
+    thumbnailObserver?.disconnect();
     const rows = devices();
     renderStats(rows);
     $('#page-title').textContent = titles[view];
-    $('#breadcrumb').textContent = titles[view];
     $('#add-device').textContent = view === 'people' ? '＋ Add User' : '＋ Add device';
     const filteredEmployee = people().find(employee => Number(employee.id) === Number(employeeFilter));
     $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users stay in inventory only.' :
       view === 'activity' ? 'The latest 100 inventory changes. Select a device to see its full history.' :
       filteredEmployee ? `Equipment assigned to ${filteredEmployee.name}.` : 'Equipment and the people who hold it.';
     $('#search').placeholder = view === 'people' ? 'Search name, employee number, branch, department, or role…' :
-      'Search device, serial, asset tag, or holder…';
+      view === 'activity' ? 'Search change, device ID, or user…' : 'Search device, holder, or spec: RAM: 16GB…';
+    $('#search').title = !['people', 'activity'].includes(view) ? 'Search specifications using name: value, e.g. RAM: 16GB or OS: Windows 11. Use the full specification name; values can be partial. Searches ignore case.' : '';
     $('#navigation').querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === view));
-    $('#inventory-layout').classList.toggle('wide', view === 'people' || view === 'activity');
+    const detailVisible = !['people', 'activity'].includes(view) && Boolean(chosen());
+    $('#inventory-layout').classList.toggle('wide', !detailVisible);
+    $('#inventory-layout').classList.toggle('drawer-open', detailVisible);
+    $('#detail').hidden = !detailVisible;
     $('#type-filter').hidden = view === 'people' || view === 'activity';
     $('#people-sort').hidden = view !== 'people';
     $('#status-filter').hidden = view === 'people' || view === 'activity';
@@ -118,12 +144,13 @@
       department: $('#department-filter').value, branch: $('#branch-filter').value, status: $('#status-filter').value, employee: employeeFilter, view });
     $('#table-head').innerHTML = '<tr><th>Device</th><th>Serial / asset tag</th><th>Assigned to</th><th>Status</th><th>Condition</th></tr>';
     $('#table-body').innerHTML = visible.map(device => `<tr class="device-row ${device.id === selected ? 'selected-row' : ''}" data-device="${device.id}">
-      <td><div class="device-cell"><span class="device-icon" aria-hidden="true">${icon(device.device_type)}</span><div><button class="row-name" data-device="${device.id}">${esc(device.name)}</button><small>${esc(device.device_type)} · #${device.id}</small></div></div></td>
+      <td><div class="device-cell"><span class="device-icon" aria-hidden="true">${portrait(device)}</span><div><button class="row-name" data-device="${device.id}" aria-controls="detail" aria-expanded="${device.id === selected}">${esc(device.name)}</button><small>${esc(device.device_type)} · #${device.id}</small></div></div></td>
       <td class="serial">${esc(device.serial_number || 'No serial recorded')}<small>${esc(device.asset_tag || 'No asset tag recorded')}</small></td>
       <td>${esc(device.holder_kind === 'shared' ? 'Shared department' : device.holder_name || 'Unassigned')}<small>${esc(device.department)}</small></td>
       <td>${badge(device)}</td><td>${conditionBadge(device)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">No devices match your filters.</td></tr>';
     $('#table-footer').textContent = `Showing ${visible.length} of ${rows.length} devices`;
     renderDetail();
+    observeThumbnails();
   }
 
   function renderPeople(rows) {
@@ -149,40 +176,54 @@
     $('#table-footer').textContent = `${employees.length} people · HR employees and inventory associates`;
   }
 
+  function photoMarkup(event, photo, index, current = false) {
+    const url = `api.php?action=evidence&amp;event=${Number(event.id)}&amp;photo=${index}`;
+    const removed = (event.removed_photo_indexes || []).includes(index);
+    return `<figure class="saved-photo"><a href="${url}" target="_blank" rel="noopener"><img loading="lazy" decoding="async" src="${url}&amp;thumbnail=1" alt="${esc(photo.name || 'Evidence photo')}" title="${esc(event.recorded_at)}"></a>
+      ${current && canEdit ? `<button type="button" class="text-button" data-remove-photo="${index}" data-photo-event="${Number(event.id)}" aria-label="Remove ${esc(photo.name || 'photo')} from current photos">Remove</button>` : removed ? '<figcaption>Removed · retained in history</figcaption>' : ''}</figure>`;
+  }
   function eventsMarkup(events) {
-    return events.map(event => `<div class="timeline-item"><span class="timeline-dot"></span><strong>${esc(event.message)}</strong><small>Recorded ${esc(event.recorded_at)}${event.handover_date ? ` · Handover ${esc(event.handover_date)}` : ''}</small><div class="evidence-photos">${(event.photos || []).map((photo, index) => `<a href="api.php?action=evidence&amp;event=${Number(event.id)}&amp;photo=${index}" target="_blank" rel="noopener"><img loading="lazy" src="api.php?action=evidence&amp;event=${Number(event.id)}&amp;photo=${index}" alt="${esc(photo.name || 'Evidence photo')}"></a>`).join('')}</div></div>`).join('') || '<p class="empty-state">No history recorded.</p>';
+    return events.map(event => `<div class="timeline-item"><span class="timeline-dot"></span><strong>${esc(event.message)}</strong><small>Recorded ${esc(event.recorded_at)}${event.handover_date ? ` · Handover ${esc(event.handover_date)}` : ''}</small><div class="evidence-photos">${(event.photos || []).map((photo, index) => photoMarkup(event, photo, index)).join('')}</div></div>`).join('') || '<p class="empty-state">No history recorded.</p>';
   }
 
   function renderActivity() {
     const query = $('#search').value.toLocaleLowerCase().trim();
-    const events = state.activity.filter(event => !query || `${event.message} ${event.device_id} ${event.event_type}`.toLocaleLowerCase().includes(query));
-    $('#table-head').innerHTML = '<tr><th>Device ID</th><th>Change</th><th>Recorded</th><th>Handover date</th></tr>';
-    $('#table-body').innerHTML = events.map(event => `<tr><td><button class="text-button" data-activity-device="${Number(event.device_id)}">#${Number(event.device_id)}</button></td><td>${esc(event.message)}</td><td>${esc(event.recorded_at)}</td><td>${esc(event.handover_date || 'Unknown / not applicable')}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">No matching activity.</td></tr>';
+    const events = state.activity.filter(event => !query || `${event.message} ${event.device_id} ${event.event_type} ${event.actor?.name || ''} ${event.actor?.username || ''}`.toLocaleLowerCase().includes(query));
+    $('#table-head').innerHTML = '<tr><th>Device ID</th><th>Change</th><th>Changed by</th><th>Recorded</th><th>Handover date</th></tr>';
+    $('#table-body').innerHTML = events.map(event => `<tr><td><button class="text-button" data-activity-device="${Number(event.device_id)}">#${Number(event.device_id)}</button></td><td>${esc(event.message)}</td><td>${esc(event.actor?.name || event.actor?.username || 'Not recorded')}${event.actor?.username ? `<small>${esc(event.actor.username)}</small>` : ''}</td><td>${esc(event.recorded_at)}</td><td>${esc(event.handover_date || 'Unknown / not applicable')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">No matching activity.</td></tr>';
     $('#table-footer').textContent = `${events.length} recent changes`;
   }
 
   async function renderDetail() {
     const generation = ++historyRequest;
     const device = chosen();
-    if (!device) { $('#detail').innerHTML = '<p class="empty-state">Select a device to view its details.</p>'; return; }
+    if (!device) { $('#detail').innerHTML = ''; return; }
     const id = device.id;
     const specs = Object.entries(device.specifications).filter(([, value]) => value);
-    $('#detail').innerHTML = `<div class="detail-top"><span>DEVICE #${id}</span></div><div class="large-device-icon" aria-hidden="true">${icon(device.device_type)}</div>
-      <h2>${esc(device.name)}</h2><div class="detail-type">${esc(device.device_type)} ${badge(device)}</div>
+    $('#detail').innerHTML = `<header class="drawer-header"><div class="large-device-icon" aria-hidden="true">${portrait(device)}</div><div class="drawer-identity"><div class="detail-top">DEVICE #${id}</div><h2>${esc(device.name)}</h2><div class="detail-type">${esc(device.device_type)} ${badge(device)}</div></div><button class="close-button" id="close-detail" aria-label="Close device details">×</button></header>
+      <div class="drawer-content">
       <div class="serial-card"><span>SERIAL NUMBER</span><strong>${esc(device.serial_number || 'Not recorded')}</strong><span class="source-hint">ASSET TAG</span><strong>${esc(device.asset_tag || 'Not recorded')}</strong></div>
-      <div class="detail-section"><h3>Current assignment</h3><p>${esc(device.holder_kind === 'shared' ? `${device.department} (shared)` : device.holder_name || 'Unassigned')}</p><small>${esc([device.job_title, device.department, device.branch].filter(Boolean).join(' · '))}</small>
+      <div class="drawer-columns"><div class="detail-section"><h3>Current assignment</h3><p>${esc(device.holder_kind === 'shared' ? `${device.department} (shared)` : device.holder_name || 'Unassigned')}</p><small>${esc([device.job_title, device.department, device.branch].filter(Boolean).join(' · '))}</small>
       ${device.employee_missing ? '<p class="assignment-hint">Employee unavailable in HR. Last recorded holder is retained.</p>' : ''}
       <div class="detail-meta"><span>Location</span><strong>${esc(device.location || 'Not recorded')}</strong></div><div class="detail-meta"><span>Condition</span>${conditionBadge(device)}</div>
       <div class="detail-meta"><span>Handover date</span><strong>${esc(device.handover_date || 'Not recorded')}</strong></div>
-      <button class="button full" id="assign-device">Assign / return ↗</button><button class="button full" id="edit-device">Edit device</button></div>
+      </div>
       <div class="detail-section"><h3>Specifications</h3><div class="specs">${specs.map(([key, value]) => `<div><span>${esc(key)}</span><strong>${esc(value)}</strong></div>`).join('') || '<small>No specifications recorded.</small>'}</div>
-      ${device.source ? `<p class="source-hint">Imported from ${esc(device.source.sheet)} · row ${Number(device.source.row)}</p>` : ''}</div>
-      <div class="detail-section history"><h3>History</h3><div id="history" class="history-list"><small>Loading history…</small></div><button class="text-button" id="add-note">＋ Add note</button></div>`;
+      ${device.source ? `<p class="source-hint">Imported from ${esc(device.source.sheet)} · row ${Number(device.source.row)}</p>` : ''}</div></div>
+      <div class="detail-section"><h3>Evidence photos</h3><div id="device-photos" class="evidence-photos" aria-live="polite"><small>Loading photos…</small></div></div>
+      <div class="detail-section history"><div class="drawer-section-heading"><h3>History</h3><button class="text-button" id="add-note">＋ Add note</button></div><div id="history" class="history-list" aria-live="polite"><small>Loading history…</small></div></div></div>
+      <footer class="drawer-actions"><button class="button" id="edit-device">Edit device</button><button class="button primary" id="assign-device">Assign / return ↗</button></footer>`;
     try {
       const history = await request(`history&id=${id}`);
-      if (historyRequest === generation && selected === id && $('#history')) $('#history').innerHTML = eventsMarkup(history);
+      if (historyRequest === generation && selected === id && $('#history')) {
+        $('#history').innerHTML = eventsMarkup(history);
+        $('#device-photos').innerHTML = history.flatMap(event => (event.photos || []).flatMap((photo, index) => (event.removed_photo_indexes || []).includes(index) ? [] : [photoMarkup(event, photo, index, true)])).join('') || '<small>No current photos. Add photos when creating or editing this device. Removed photos remain in history.</small>';
+      }
     } catch (error) {
-      if (historyRequest === generation && selected === id && $('#history')) $('#history').textContent = error.message;
+      if (historyRequest === generation && selected === id && $('#history')) {
+        $('#history').textContent = error.message;
+        $('#device-photos').textContent = 'Photos could not be loaded. Select Refresh to try again.';
+      }
     }
   }
 
@@ -198,6 +239,8 @@
   }
 
   function editDevice(device = null) {
+    if (!canEdit) return;
+    let pendingPhotos = () => [];
     const branchId = device ? device.location_branch_id : state.branches.find(branch => branch.name.toUpperCase() === 'APO')?.id;
     const missingBranch = branchId && !state.branches.some(branch => branch.id === branchId);
     const locationOptions = (missingBranch ? `<option value="${Number(branchId)}" selected>${esc(device.location || 'Unavailable branch')}</option>` : '') +
@@ -206,8 +249,8 @@
       `<div class="field-row"><label>Device type<select name="device_type">${options(types, device?.device_type || 'Laptop')}</select></label>${field('Brand / model *', 'name', device?.name, 'required')}</div>
       <div class="field-row">${field('Serial number', 'serial_number', device?.serial_number)}${field('Asset tag', 'asset_tag', device?.asset_tag)}</div>
       <div class="field-row"><label>Condition<select name="device_condition">${options(conditions, device?.device_condition || 'Unknown')}</select></label><label>Location<select name="location_branch_id"><option value="">Not recorded</option>${locationOptions}</select></label></div>
-      <label>Evidence photos (optional)<input id="evidence-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small>Up to 5 photos, 2 MiB each. JPEG, PNG or WebP. Saved photos appear in device history.</small></label><div id="evidence-selection" aria-live="polite"></div>
-      <div><h3>Specifications</h3><small>Hardware and software, including OS, LICENSE, MICROSOFT 365, ANTI VIRUS, SAP, ADOBE, and VIBER. Up to 128 fields; blank values are cleared.</small><div id="spec-editor"></div><button type="button" class="button" id="add-specification">Add specification</button></div>`, async form => {
+      <label>Evidence photos (optional)<input id="evidence-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small>Paste an image with Ctrl+V anywhere in this form, or choose files. Up to 5 JPEG, PNG or WebP photos, 20 MiB and 40 megapixels each. Large photos are compressed before upload. Photos are saved when you select Save.</small></label><div id="evidence-selection" aria-live="polite"></div>
+      <small id="photo-progress" aria-live="polite"></small><div><h3>Specifications</h3><small>Hardware and software, including OS, LICENSE, MICROSOFT 365, ANTI VIRUS, SAP, ADOBE, and VIBER. Up to 128 fields; blank values are cleared.</small><div id="spec-editor"></div><button type="button" class="button" id="add-specification">Add specification</button></div>`, async form => {
         const specifications = Object.create(null);
         for (const row of $('#spec-editor').querySelectorAll('[data-spec-row]')) {
           const key = row.querySelector('input').value.trim();
@@ -217,8 +260,10 @@
           if (Object.hasOwn(specifications, key)) throw new Error(`Repeated specification: ${key}`);
           specifications[key] = value;
         }
-        const files = Array.from($('#evidence-photos').files);
-        if (files.length > 5 || files.some(file => file.size > 2 * 1024 * 1024)) throw new Error('Choose up to 5 photos, no larger than 2 MiB each.');
+        const files = await InventoryPhotos.prepare(pendingPhotos(), message => {
+          $('#photo-progress').textContent = message;
+        });
+        $('#photo-progress').textContent = files.length ? 'Photos ready. Saving…' : '';
         const payload = { ...form, specifications, ...(device ? { id: device.id, version: device.version } : {}) };
         let data = payload;
         if (files.length) {
@@ -229,9 +274,7 @@
         const saved = await request('device', 'POST', data);
         selected = saved.id;
       });
-    $('#evidence-photos').addEventListener('change', () => {
-      $('#evidence-selection').textContent = Array.from($('#evidence-photos').files).map(file => file.name).join(', ');
-    });
+    pendingPhotos = InventoryPhotos.attach($('#dialog'), $('#evidence-photos'), $('#evidence-selection'), $('#form-error'), () => $('#save-dialog').disabled);
     const addSpec = (key = '', value = '') => {
       if ($('#spec-editor').querySelectorAll('[data-spec-row]').length >= 128) return;
       $('#spec-editor').insertAdjacentHTML('beforeend', `<div class="spec-edit-row" data-spec-row><label>Specification name<input maxlength="100" value="${esc(key)}"></label><label>Value<textarea rows="2" maxlength="4000">${esc(value)}</textarea></label><button type="button" class="text-button" data-remove-spec>Remove</button></div>`);
@@ -278,10 +321,14 @@
     } catch (error) {
       $('#form-error').textContent = error.message;
       $('#form-error').hidden = false;
-    } finally { $('#save-dialog').disabled = false; }
+    } finally {
+      $('#save-dialog').disabled = false;
+      if ($('#photo-progress')) $('#photo-progress').textContent = '';
+    }
   });
 
   function navigate(nextView) {
+    selected = null;
     view = nextView;
     employeeFilter = null;
     $('#search').value = '';
@@ -296,6 +343,8 @@
   document.addEventListener('click', event => {
     const target = event.target.closest('button, [data-device]');
     if (!target) return;
+    if (target.dataset.removePhoto !== undefined) { removePhoto(target); return; }
+    if (target.id === 'close-detail') { closeDetail(); return; }
     if (target.dataset.stat) {
       navigate(target.dataset.stat === 'attention' ? 'attention' : 'devices');
       if (target.dataset.stat === 'assigned' || target.dataset.stat === 'available') {
@@ -325,6 +374,30 @@
       const device = chosen();
       openDialog('Add a note', device.name, '<label>Note *<textarea name="message" required maxlength="2000" rows="4"></textarea></label>',
         async form => { await request('note', 'POST', { id: device.id, message: form.message }); });
+    }
+  });
+  function closeDetail() {
+    const previous = selected;
+    selected = null;
+    render();
+    document.querySelector(`button[data-device="${previous}"]`)?.focus();
+  }
+  async function removePhoto(button) {
+    const device = chosen();
+    if (!device || button.disabled) return;
+    button.disabled = true;
+    showError('');
+    try {
+      await request('photo-remove', 'POST', { id: device.id, version: device.version,
+        event: Number(button.dataset.photoEvent), photo: Number(button.dataset.removePhoto) });
+      await reload();
+    } catch (error) { showError(error.message); }
+    finally { button.disabled = false; }
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && selected && !$('#dialog').open && !$('#import-dialog').open && !$('#photo-viewer').open) {
+      event.preventDefault();
+      closeDetail();
     }
   });
   $('#search').addEventListener('input', render);

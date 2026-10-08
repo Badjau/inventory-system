@@ -12,11 +12,72 @@ final class InventoryService
     public const TYPES = ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other'];
     public const CONDITIONS = ['Good', 'Needs attention', 'Faulty', 'Unknown'];
 
-    public function __construct(private PDO $db) {}
+    private array $actor;
 
-    public function devices(): array
+    public function __construct(private PDO $db, ?array $actor = null)
     {
-        return array_map($this->decode(...), $this->db->query('SELECT * FROM inv_devices ORDER BY id')->fetchAll());
+        // Copy only audit identity, never credentials or client-supplied fields.
+        $this->actor = $actor === null
+            ? ['id' => null, 'name' => 'System / CLI', 'username' => null]
+            : ['id' => self::positiveInt($actor['id'] ?? null, 'actor ID'),
+                'name' => $actor['name'] ?? '', 'username' => $actor['username'] ?? ''];
+    }
+
+    public function devices(bool $withPhotos = false): array
+    {
+        $devices = array_map($this->decode(...), $this->db->query('SELECT * FROM inv_devices ORDER BY id')->fetchAll());
+        if ($withPhotos) {
+            $portraits = [];
+            foreach ($this->currentPhotos() as $photo) $portraits[$photo['device_id']] ??= $photo;
+            foreach ($devices as &$device) {
+                $device['photo_event_id'] = $portraits[$device['id']]['event_id'] ?? null;
+                $device['photo_index'] = $portraits[$device['id']]['index'] ?? null;
+            }
+            unset($device);
+        }
+        return $devices;
+    }
+
+    private function currentPhotos(?int $deviceId = null): array
+    {
+        // Read only photo metadata and removal references, never full device snapshots.
+        $query = $this->db->prepare("SELECT id, device_id,
+            JSON_EXTRACT(snapshot_json, '$.evidence_photos') AS photos,
+            JSON_EXTRACT(snapshot_json, '$.removed_photo') AS removed_photo
+            FROM inv_events WHERE (event_type = 'photo-remove' OR JSON_EXTRACT(snapshot_json, '$.evidence_photos[0].file') IS NOT NULL)"
+            . ($deviceId === null ? '' : ' AND device_id = ?') . ' ORDER BY id');
+        $query->execute($deviceId === null ? [] : [$deviceId]);
+        $photos = [];
+        foreach ($query->fetchAll() as $event) {
+            foreach (json_decode($event['photos'] ?? '[]', true, 512, JSON_THROW_ON_ERROR) as $index => $photo) {
+                $photos[$event['id'] . ':' . $index] = ['device_id' => (int) $event['device_id'], 'event_id' => (int) $event['id'], 'index' => $index, 'name' => $photo['name']];
+            }
+            $removed = json_decode($event['removed_photo'] ?? 'null', true, 512, JSON_THROW_ON_ERROR);
+            if ($removed) unset($photos[$removed['event_id'] . ':' . $removed['index']]);
+        }
+        return array_values($photos);
+    }
+
+    public function removePhoto(array $input): array
+    {
+        $id = self::positiveInt($input['id'] ?? null, 'device ID');
+        $version = self::positiveInt($input['version'] ?? null, 'version');
+        $eventId = self::positiveInt($input['event'] ?? null, 'event ID');
+        $rawIndex = $input['photo'] ?? null;
+        $index = (is_int($rawIndex) || is_string($rawIndex)) ? filter_var($rawIndex, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) : false;
+        if ($index === false) throw new ValidationException('Invalid photo index.');
+        return $this->transaction(function () use ($id, $version, $eventId, $index): array {
+            $before = $this->device($id);
+            $photo = null;
+            foreach ($this->currentPhotos($id) as $candidate) {
+                if ($candidate['event_id'] === $eventId && $candidate['index'] === $index) $photo = $candidate;
+            }
+            if (!$photo) throw new ValidationException('Photo was already removed or does not belong to this device. Refresh and try again.', 409);
+            $this->update($id, $version, []);
+            $this->event($id, 'photo-remove', 'Photo removed from current device photos: ' . $photo['name'] . '. Original retained in history.',
+                before: $before, extra: ['removed_photo' => ['event_id' => $eventId, 'index' => $index, 'name' => $photo['name']]]);
+            return $this->device($id);
+        });
     }
 
     public function device(int $id): array
@@ -53,11 +114,19 @@ final class InventoryService
         $query = $this->db->prepare('SELECT id, device_id, event_type, message, handover_date, recorded_at, snapshot_json
             FROM inv_events' . ($deviceId === null ? ' ORDER BY id DESC LIMIT 100' : ' WHERE device_id = ? ORDER BY id DESC'));
         $query->execute($deviceId === null ? [] : [$deviceId]);
-        return array_map(static function (array $event): array {
-            $event['photos'] = json_decode($event['snapshot_json'], true, 512, JSON_THROW_ON_ERROR)['evidence_photos'] ?? [];
+        $events = array_map(static function (array $event): array {
+            $snapshot = json_decode($event['snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
+            $event['photos'] = $snapshot['evidence_photos'] ?? [];
+            $event['actor'] = $snapshot['actor'] ?? null;
+            $event['removed_photo'] = $snapshot['removed_photo'] ?? null;
             unset($event['snapshot_json']);
             return $event;
         }, $query->fetchAll());
+        $removed = [];
+        foreach ($events as $event) if ($event['removed_photo']) $removed[$event['removed_photo']['event_id']][] = $event['removed_photo']['index'];
+        foreach ($events as &$event) $event['removed_photo_indexes'] = $removed[$event['id']] ?? [];
+        unset($event);
+        return $events;
     }
 
     public static function text(array $input, string $field, bool $required = false, int $max = 255): ?string
@@ -137,7 +206,8 @@ final class InventoryService
     {
         // Fixed keys originate in this class, never in request field names.
         $assignments = implode(', ', array_map(static fn (string $key): string => "$key = ?", array_keys($values)));
-        $query = $this->db->prepare("UPDATE inv_devices SET $assignments, version = version + 1,
+        $setValues = $assignments === '' ? '' : $assignments . ', ';
+        $query = $this->db->prepare("UPDATE inv_devices SET {$setValues}version = version + 1,
             updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?");
         $query->execute([...array_values($values), $id, $version]);
         if ($query->rowCount() !== 1) {
@@ -154,12 +224,12 @@ final class InventoryService
         return (int) $this->db->lastInsertId();
     }
 
-    private function event(int $id, string $type, string $message, ?string $date = null, ?array $before = null, ?array $incoming = null, array $photos = []): void
+    private function event(int $id, string $type, string $message, ?string $date = null, ?array $before = null, ?array $incoming = null, array $photos = [], array $extra = []): void
     {
         $query = $this->db->prepare('INSERT INTO inv_events
             (device_id, event_type, message, handover_date, snapshot_json) VALUES (?, ?, ?, ?, ?)');
         $query->execute([$id, $type, $message, $date,
-            json_encode(['before' => $before, 'after' => $this->device($id), ...($incoming === null ? [] : ['incoming_source' => $incoming]), ...($photos ? ['evidence_photos' => $photos] : [])], JSON_THROW_ON_ERROR)]);
+            json_encode(['actor' => $this->actor, 'before' => $before, 'after' => $this->device($id), ...($incoming === null ? [] : ['incoming_source' => $incoming]), ...($photos ? ['evidence_photos' => $photos] : []), ...$extra], JSON_THROW_ON_ERROR)]);
     }
 
     public function save(array $input, array $photos = []): array
