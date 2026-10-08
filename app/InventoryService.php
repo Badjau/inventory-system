@@ -84,14 +84,15 @@ final class InventoryService
             throw new ValidationException('Choose a supported device type and condition.');
         }
         $specs = $input['specifications'] ?? [];
-        if (!is_array($specs) || count($specs) > 20) {
+        if (!is_array($specs) || count($specs) > 128) {
             throw new ValidationException('Invalid specifications.');
         }
         $clean = [];
         foreach ($specs as $key => $value) {
-            if (!is_string($key) || !is_string($value) || mb_strlen($key) > 60 || mb_strlen($value) > 255) {
+            if (!is_string($key) || !is_string($value) || mb_strlen($key) > 100 || mb_strlen($value) > 4000) {
                 throw new ValidationException('Invalid specification name or value.');
             }
+            if (trim($key) === '' && trim($value) !== '') throw new ValidationException('Specification names cannot be blank.');
             if (trim($key) !== '' && trim($value) !== '') {
                 $clean[trim($key)] = trim($value);
             }
@@ -149,12 +150,12 @@ final class InventoryService
         return (int) $this->db->lastInsertId();
     }
 
-    private function event(int $id, string $type, string $message, ?string $date = null, ?array $before = null): void
+    private function event(int $id, string $type, string $message, ?string $date = null, ?array $before = null, ?array $incoming = null): void
     {
         $query = $this->db->prepare('INSERT INTO inv_events
             (device_id, event_type, message, handover_date, snapshot_json) VALUES (?, ?, ?, ?, ?)');
         $query->execute([$id, $type, $message, $date,
-            json_encode(['before' => $before, 'after' => $this->device($id)], JSON_THROW_ON_ERROR)]);
+            json_encode(['before' => $before, 'after' => $this->device($id), ...($incoming === null ? [] : ['incoming_source' => $incoming])], JSON_THROW_ON_ERROR)]);
     }
 
     public function save(array $input): array
@@ -262,6 +263,90 @@ final class InventoryService
             }
             return ['added' => $added, 'skipped' => $skipped];
         });
+    }
+
+    public function applyImport(array $records, HrDirectory $hr): array
+    {
+        $employees = array_column($hr->all(), null, 'id');
+        $departments = DepartmentNames::configured($hr->departments());
+        try {
+            return $this->transaction(function () use ($records, $hr, $employees, $departments): array {
+            $added = $updated = 0;
+            $seen = [];
+            $exists = $this->db->prepare('SELECT id FROM inv_devices WHERE import_key = ?');
+            foreach ($records as $record) {
+                $id = $record['target_id'];
+                $before = $id === null ? null : $this->device($id);
+                if ($before && $before['version'] !== $record['target_version']) throw new ValidationException('A previewed device changed. Upload again to review current information.', 409);
+                if (isset($seen[$id ?? $record['import_key'] ?? 'new:' . $record['source']['row']])) throw new ValidationException('Repeated import target.');
+                $seen[$id ?? $record['import_key'] ?? 'new:' . $record['source']['row']] = true;
+                if (!$before && $record['import_key']) {
+                    $exists->execute([$record['import_key']]);
+                    if ($exists->fetchColumn() !== false) throw new ValidationException('A device was imported after this preview. Upload again.', 409);
+                }
+                $exchange = $record['exchange'] ?? false;
+                $input = $record;
+                if ($before) $input['id'] = $id;
+                if (!$exchange) {
+                    unset($input['location']);
+                    $input['device_condition'] = $before['device_condition'] ?? 'Unknown';
+                }
+                $input['specifications'] = array_filter($record['specifications'], static fn ($v): bool => $v !== '');
+                $values = $this->editable($input);
+                $kind = $record['holder_kind'];
+                if (!in_array($kind, ['employee', 'imported', 'shared', 'unassigned'], true)) throw new ValidationException('Invalid holder kind in workbook.');
+                $holder = ['holder_kind' => $kind, 'hr_employee_id' => null, 'holder_name' => null,
+                    'department' => null, 'department_id' => null, 'branch' => null, 'job_title' => null];
+                $employeeId = $record['approved_employee_id'];
+                if ($employeeId !== null) {
+                    $employee = $employees[$employeeId] ?? null;
+                    if (!$employee) throw new ValidationException('A selected HR employee no longer exists. Upload again.');
+                    $holder = ['holder_kind' => 'employee', 'hr_employee_id' => $employeeId, 'holder_name' => $employee['name'],
+                        'department' => $employee['department'], 'department_id' => $employee['department_id'],
+                        'branch' => $employee['branch'], 'job_title' => $employee['job_title']];
+                } elseif ($kind === 'shared') {
+                    $department = $exchange && $record['department_id'] !== null
+                        ? $hr->department(self::positiveInt($record['department_id'], 'department ID'))
+                        : $departments->required(self::text($record, 'department', true));
+                    $holder['department'] = $department['name'];
+                    $holder['department_id'] = $department['id'];
+                } elseif ($kind !== 'unassigned') {
+                    $holder['holder_name'] = self::text($record, 'holder_name');
+                    $holder['holder_kind'] = $holder['holder_name'] === null ? 'unassigned' : 'imported';
+                    $department = $record['department'] ? $departments->required($record['department']) : null;
+                    $holder['department'] = $department['name'] ?? null;
+                    $holder['department_id'] = $department['id'] ?? null;
+                    $holder['branch'] = self::text($record, 'branch');
+                    $holder['job_title'] = self::text($record, 'job_title');
+                }
+                $values = array_merge($values, $holder);
+                if ($exchange) {
+                    $date = self::text($record, 'handover_date');
+                    if ($date !== null) self::validateDate($date);
+                    $values['handover_date'] = $holder['holder_kind'] === 'unassigned' ? null : $date;
+                }
+                if ($before) {
+                    $this->update($id, $record['target_version'], $values);
+                    $updated++;
+                } else {
+                    $values['import_key'] = $record['import_key'];
+                    $values['source_json'] = json_encode($record['source'], JSON_THROW_ON_ERROR);
+                    $id = $this->insert($values);
+                    $added++;
+                }
+                $this->event($id, $before ? 'import-update' : 'import',
+                    ($before ? 'Updated' : 'Imported') . ' from approved Excel group; ' . $record['source']['sheet'] . ' row ' . $record['source']['row'] . '.',
+                    before: $before, incoming: $record['source']);
+            }
+            return ['added' => $added, 'updated' => $updated];
+            });
+        } catch (\PDOException $error) {
+            if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+                && in_array((int) ($error->errorInfo[1] ?? 0), [1062, 1213, 1205], true)) {
+                throw new ValidationException('Inventory changed during import. Upload again to review current devices.', 409);
+            }
+            throw $error;
+        }
     }
 
     public function locateImported(array $records): array

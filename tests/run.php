@@ -71,7 +71,9 @@ try {
     $db->exec("INSERT INTO branches VALUES (1, 'Primary branch'), (2, 'Other branch'), (3, 'APO');");
     $db->exec('INSERT INTO branch_employee VALUES (1, 1, 2, 0), (2, 1, 1, 1);');
 
-    $records = Workbook::records(dirname(__DIR__) . '/INVENTORY 2026.xlsx');
+    // Fixed baseline for count/history regressions; the working workbook is editable.
+    $workbookPath = dirname(__DIR__) . '/INVENTORY 2026.xlsx.before-department-cleanup.2.xlsx';
+    $records = Workbook::records($workbookPath);
     $summary = Workbook::summary($records);
     check($summary['total'] === 216, 'Workbook device total changed; review mapping');
     check($summary['types'] === ['Printer' => 9, 'Desktop' => 39, 'Keyboard' => 39, 'Mouse' => 39, 'Monitor' => 45, 'Laptop' => 45], 'Workbook type counts');
@@ -117,11 +119,11 @@ try {
     check($departmentNames->display(['department_id' => 1, 'department' => 'ACCOUNTING'])['department'] === 'Accounting', 'Stored department ID resolves its current HR name');
     check($departmentNames->display(['department' => 'ACCOUNTING'])['department_id'] === 1, 'Legacy formatting resolves a numeric ID for the website');
     check($departmentNames->display(['department_id' => 9999, 'department' => 'Old department'])['department'] === 'Old department', 'Deleted HR department retains its snapshot');
-    check(WorkbookDepartmentCleanup::plan(dirname(__DIR__) . '/INVENTORY 2026.xlsx', $departmentNames)['unresolved'] === [], 'Workbook departments all resolve to HR');
+    check(WorkbookDepartmentCleanup::plan($workbookPath, $departmentNames)['unresolved'] === [], 'Workbook departments all resolve to HR');
     $workbookCopy = tempnam(__DIR__, 'inv_departments_');
     if ($workbookCopy === false) throw new RuntimeException('Cannot create workbook test fixture.');
     try {
-        copy(dirname(__DIR__) . '/INVENTORY 2026.xlsx', $workbookCopy);
+        copy($workbookPath, $workbookCopy);
         $beforeSheets = Workbook::sheets($workbookCopy);
         $aliases = [];
         foreach ($beforeSheets as $rows) foreach ($rows as $row => $cells) {
@@ -307,6 +309,10 @@ try {
     $invalidDepartments = $service->devices();
     rejects(static fn () => $service->normalizeDepartments($departmentNames));
     check($service->devices() === $invalidDepartments, 'Unknown department rolls back the entire inventory cleanup');
+    require __DIR__ . '/exchange.php';
+    exchangeTests($db, $service, $hr, $records, $mysql, $workbookPath);
+    require __DIR__ . '/workbook-layouts.php';
+    workbookLayoutTests($workbookPath, $records, $service, $hr);
     check(Http::allowsLocal('127.0.0.1') && Http::allowsLocal('::1'), 'Localhost allowed');
     check(!Http::allowsLocal('192.168.100.72') && !Http::allowsLocal(''), 'LAN blocked by default');
     $authDirectory = __DIR__ . '/inventory_auth_' . bin2hex(random_bytes(8));

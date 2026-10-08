@@ -40,8 +40,8 @@ final class Http
         if (!str_starts_with(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'application/json')) {
             throw new ValidationException('Send JSON data.', 415);
         }
-        $raw = file_get_contents('php://input', false, null, 0, 65537);
-        if (strlen($raw) > 65536) {
+        $raw = file_get_contents('php://input', false, null, 0, 1048577);
+        if (strlen($raw) > 1048576) {
             throw new ValidationException('Request too large.', 413);
         }
         try {

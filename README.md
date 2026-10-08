@@ -2,7 +2,7 @@
 
 The first working slice follows the layout in the original `index.html`: device table, counts, filters, and a detail panel. Run the application from **`public/`**. The original mockup stays at the project root as a design reference.
 
-The website is the main inventory workspace. Register new equipment, edit identifiers/specifications, assign or return devices, and record notes there. Excel is an optional initial source of test data; the running application does not read it or synchronize website changes back to it.
+The website is the main inventory workspace. Register new equipment, edit identifiers/specifications, assign or return devices, and record notes there. Use **Import Excel** to review and approve workbook updates, and **Export Excel** to download current inventory in a reimportable format. Excel synchronization is manual.
 
 The app uses PHP 8.3, PDO, MySQL, and plain HTML/CSS/JavaScript. Employee details come from **`attendance_monitoring`**, the local timekeeping database confirmed during setup. `mcasiafoodtrade_db1` was superseded by that choice. Inventory owns only `inv_devices` and `inv_events`; employee tables receive only SELECT queries.
 
@@ -64,9 +64,33 @@ If `php` is missing from your terminal's PATH, use `C:\laragon\bin\php\php-8.3.3
 
 Assignment records use the HR employee table's numeric `id`. Names and organizational details are read live for display; event snapshots preserve past holders. If HR deletes an employee, the last recorded holder remains visible until equipment is returned or reassigned. Inventory does not have a foreign key that cascades from HR.
 
-Workbook holder names are accepted as current assignments and displayed with **Assigned** status. No employee ID is inferred from a recorded name. If a holder needs to be linked later, use **Assign / return** to select the correct HR employee. Until then, the recorded holder name remains visible and the equipment stays assigned. The handover date may stay blank when unknown. Each PC component is an individual item. Conditions are imported as Unknown, and `--location-apo` assigns the APO branch location independently of the holder's HR branch.
+CLI-seeded workbook holder names are accepted as current assignments and displayed with **Assigned** status without inferring employee IDs. Website import suggests only unique names matching HR after case/whitespace normalization, or a valid existing numeric link. Review the suggested selection before approval. Blank HR selections retain the recorded holder name and assigned status. The handover date may stay blank when unknown. Each PC component is an individual item. New original-format imports use Unknown condition; existing condition/location/handover dates are preserved. CLI `--location-apo` assigns APO independently of the holder's HR branch.
 
-The cleaned workbook produces **216 devices**: 9 printers, 39 desktops, 39 keyboards, 39 mice, 45 monitors, and 45 laptops. Keyboard and mouse serial numbers and asset tags come from separate columns; leading `SN:` is removed from accessory serial numbers. Monitor fields, desktop OS, and MAC address use their shifted columns. Expected PC headers are checked before any import. Eight items have neither identifier. Repeated accessory serials and one repeated asset tag are retained and reported. The internal device ID is the primary key; serials and asset tags are searchable fields. Original row cells, including software details, are preserved in the source JSON, although the first UI displays only hardware specifications. Rows with no laptop hardware do not create a device.
+The cleaned workbook produces **216 devices**: 9 printers, 39 desktops, 39 keyboards, 39 mice, 45 monitors, and 45 laptops. Keyboard and mouse serial numbers and asset tags come from separate columns; leading `SN:` is removed from accessory serial numbers. Monitor fields, desktop OS, and MAC address use their shifted columns. Expected PC headers are checked before any import. Eight items have neither identifier. Repeated accessory serials and one repeated asset tag are retained and reported. The internal device ID is the primary key; serials and asset tags are searchable fields. Original row cells are preserved in source JSON; desktop/laptop specifications include all software columns on website import and new CLI seeds. Rows with no laptop hardware do not create a device.
+
+## Excel import and export
+
+PC fields are located by normalized header names. Both separate accessory serial/tag columns and combined `KEYBOARD SERIAL NO#/ASSET TAG` / `MOUSE SERIAL NO#/ASSET TAG` columns are supported. Shifting columns does not change sheet/row/component source keys. The current workbook previews 228 devices: 9 printers, 41 desktops, 40 keyboards, 40 mice, 46 monitors, and 52 laptops. The older 216-device counts elsewhere describe the original baseline.
+
+1. Select **Import Excel** and upload `INVENTORY 2026.xlsx` or a previously exported workbook. Maximum upload is 5 MiB, subject to PHP's `upload_max_filesize` and `post_max_size`; raise those in Laragon's PHP configuration if needed. Expanded ZIP contents are limited to 32 MiB and imports to 2,000 devices.
+2. Preview groups of devices per HR employee or recorded holder. Change or clear the HR selector; groups selecting the same employee merge for one approval. Conflicting existing links require an explicit review. Shared printers group by department. Select the groups to import, then choose **Approve selected groups**. No changes occur before approval.
+3. Original-format imports update matching sheet/row/component source keys. Keep original row order when updating; reordering changes device identity. Serial numbers and asset tags are never used to merge devices. Other equipment assigned to the employee remains unchanged.
+4. Approved rows replace device names/identifiers/specifications and update holder links. Blank specification cells clear values; specifications absent from the incoming row are removed. Original-format updates preserve condition, location, and handover date. Original source records stay intact; history captures before/after values and the incoming row. Selected groups save atomically; stale previews require a new upload. A preview lasts 30 minutes and is released after approval, including unselected groups.
+5. Select **Export Excel** to download all current devices as one row per device. Inventory IDs/source keys are identity metadata; retain them for updates. To add a new device using an exported row, clear **Inventory ID** and **Source key**. The remaining columns contain assignments, condition, location, handover date, and all current specifications. Strings retain leading zeros and formula-like text as literal values.
+
+Specifications include OS, LICENSE, MICROSOFT 365, ANTI VIRUS, SAP, Adobe fields, VIBER, and every additional workbook column. PC software belongs to the desktop; peripherals retain the complete original row in source JSON. Duplicate headers use column suffixes (`OR NUMBER (Z)`); populated unnamed columns use `Column Q`. Specifications support 128 fields, labels up to 100 characters, and values up to 4,000 characters. The editor uses individual name/value fields and preserves multiline values. Existing devices acquire previously missing software specifications when their website import groups are approved; no automatic database backfill occurs.
+
+The CLI importer remains append-only and skips existing keys; new CLI seeds include software columns. HR data remains read-only. No schema migration is required. Apache needs write access to `storage/` for temporary exports, which are removed after download.
+
+Excel browser smoke checks (run with MySQL/Laragon available):
+
+1. Upload the current workbook and confirm 228 devices with separate PC components; inspect combined accessory identifiers, shifted monitor fields, software columns beyond MAC address, and distinct duplicate headers. The historical baseline workbook produces 216 devices.
+2. Confirm unique name suggestions, blank unmatched/ambiguous selections, editable links, conflict resolution, and merged employee groups. Approve one group and verify only its devices change and People counts update.
+3. Reimport a group with changed OS/LICENSE/MICROSOFT 365/SAP/Adobe/VIBER and blank cells. Verify overwritten/removed specifications, retained device IDs/source snapshots, preserved condition/location/date, and new import-update history.
+4. Edit a device after preview, then approve its group: expect a conflict and no partial writes. Cancel/close, invalid uploads, keyboard navigation, Escape, and narrow/mobile layouts must work.
+5. Export, inspect leading-zero identifiers and all specification columns, reimport the export, and confirm no duplicate devices. Check current HR names and retained deleted-employee snapshots. Confirm export/import require login and writes require CSRF.
+
+Implementation verification: PHP lint and 1,344 isolated SQLite assertions passed, including both PC layouts and all current workbook software columns; JavaScript syntax and 49 frontend assertions passed in the V8 fallback. Fixed count/history regressions use the archived `INVENTORY 2026.xlsx.before-department-cleanup.2.xlsx` baseline so editing the working workbook does not invalidate them. Required native Node commands abort with `ncrypto::CSPRNG` initialization failure, MySQL tests/doctor fail with PDO 2002, and the PHP server cannot bind localhost. Actual Excel/browser/LAN smoke checks remain unverified in this environment.
 
 ## Checks
 
@@ -98,6 +122,7 @@ php tools\check.php
 php tests\run.php
 node --check public\assets\app.js
 node --check public\assets\model.js
+node --check public\assets\import.js
 node tests\frontend.js
 ```
 
@@ -164,6 +189,6 @@ Authentication implementation checks: 153 isolated SQLite assertions passed, inc
 
 ## Next slice
 
-Local-only access remains the default until explicit LAN activation. Inventory login and authorization protect both page and API access in either mode using attendance Admin/IT Admin accounts. Later slices can add formal issue resolution, export, and workstation group transfers. The architecture is described in `ARCHITECTURE.md`.
+Local-only access remains the default until explicit LAN activation. Inventory login and authorization protect both page and API access in either mode using attendance Admin/IT Admin accounts. Later slices can add formal issue resolution and workstation group transfers. The architecture is described in `ARCHITECTURE.md`.
 #   i n v e n t o r y - s y s t e m  
  

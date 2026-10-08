@@ -28,7 +28,22 @@
           filter.status === 'imported' ? device.holder_kind === 'imported' : device.holder_kind !== 'unassigned'));
     });
   }
-  const model = { escape, attention, displayDevice, filterDevices };
+  function importGroups(groups, choices) {
+    const merged = new Map();
+    for (const group of groups) {
+      const choice = choices[group.id];
+      const key = choice.employeeId && (!group.conflict || choice.resolved) ? `employee:${choice.employeeId}` : `group:${group.id}`;
+      if (!merged.has(key)) merged.set(key, { key, origins: [], records: [], employeeId: choice.employeeId,
+        label: group.label, conflict: false, selected: true });
+      const result = merged.get(key);
+      result.origins.push(group.id);
+      result.records.push(...group.records);
+      result.conflict ||= group.conflict && !choice.resolved;
+      result.selected &&= choice.selected;
+    }
+    return [...merged.values()];
+  }
+  const model = { escape, attention, displayDevice, filterDevices, importGroups };
   if (typeof module !== 'undefined' && module.exports) module.exports = model;
   else root.InventoryModel = Object.freeze(model);
 })(globalThis);

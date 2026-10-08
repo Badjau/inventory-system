@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace Inventory;
 
-use RuntimeException;
 use ZipArchive;
 
 // A reader for this workbook's three sheets, not a general spreadsheet engine.
@@ -15,7 +14,7 @@ final class Workbook
     {
         $zip = new ZipArchive();
         if ($zip->open($path) !== true) {
-            throw new RuntimeException('Cannot open workbook: ' . basename($path));
+            throw new ValidationException('Cannot open this XLSX workbook.');
         }
         try {
             if ($zip->numFiles > 256) throw new ValidationException('Workbook has too many entries.');
@@ -24,9 +23,9 @@ final class Workbook
             if ($expanded > 32 * 1024 * 1024) throw new ValidationException('Workbook is too large when expanded.');
             $xml = static function (string $entry) use ($zip): \SimpleXMLElement {
                 $value = $zip->getFromName($entry);
-                $node = $value === false ? false : simplexml_load_string($value, \SimpleXMLElement::class, LIBXML_NONET);
+                $node = $value === false ? false : @simplexml_load_string($value, \SimpleXMLElement::class, LIBXML_NONET);
                 if ($node === false) {
-                    throw new RuntimeException('Invalid or missing workbook XML: ' . $entry);
+                    throw new ValidationException('Invalid or missing workbook XML: ' . $entry);
                 }
                 return $node;
             };
@@ -99,29 +98,29 @@ final class Workbook
     public static function records(string $path): array
     {
         $sheets = self::sheets($path);
+        if (isset($sheets['Devices'])) return WorkbookExchange::records($sheets['Devices']);
+        $pcColumns = self::pcColumns($sheets['PC'][1] ?? []);
         foreach (['Printer' => ['A' => 'BRAND', 'E' => 'SERIAL NUMBER'],
-            'PC' => ['A' => 'NAME', 'B' => 'DEPARTMENT', 'C' => 'POSITION',
-                'D' => 'RAM', 'E' => 'CPU', 'F' => 'STORAGE', 'G' => 'SYSTEM UNIT ASSET TAG',
-                'H' => 'KEY BOARD BRAND', 'I' => 'KEYBOARD SERIAL NO#', 'J' => 'KEYBOARD ASSET TAG',
-                'K' => 'MOUSE BRAND', 'L' => 'MOUSE SERIAL NO#', 'M' => 'MOUSE ASSET TAG',
-                'N' => 'MONITOR COUNT', 'O' => 'MONITOR SIZE', 'P' => 'MONITOR BRAND',
-                'Q' => 'MONITOR 1 ASSET TAG', 'R' => 'MONITOR 2 ASSET TAG',
-                'U' => 'MAC ADDRESS', 'W' => 'OS'],
             'Laptop' => ['A' => 'NAME', 'G' => 'LAPTOP BRAND', 'H' => 'LAPTOP SERIAL NO#']] as $sheet => $headers) {
             foreach ($headers as $column => $header) {
                 if (strtoupper(trim($sheets[$sheet][1][$column] ?? '')) !== $header) {
-                    throw new RuntimeException("Unexpected $sheet header in column $column; review the import mapping.");
+                    throw new ValidationException("Unexpected $sheet header in column $column; review the import mapping.");
                 }
             }
         }
         $records = [];
-        $add = static function (string $sheet, int $row, string $component, array $cells, array $data) use (&$records, $sheets): void {
+        $add = static function (string $sheet, int $row, string $component, array $cells, array $data) use (&$records, $sheets, $pcColumns): void {
             // Keep every additional column, including software, alongside the hardware mapping.
-            $mapped = $sheet === 'PC' ? range('A', 'R') : ($sheet === 'Laptop' ? range('A', 'J') : ['A', 'B', 'C', 'D', 'E', 'G']);
+            $mapped = $sheet === 'PC' ? array_values($pcColumns) : ($sheet === 'Laptop' ? range('A', 'J') : ['A', 'B', 'C', 'D', 'E', 'G']);
             $specs = $data['specifications'] ?? [];
-            foreach ($sheets[$sheet][1] as $column => $header) {
-                if (!in_array($column, $mapped, true) && self::value($cells[$column] ?? null) !== null) {
-                    $specs[$header] = $cells[$column];
+            if (in_array($component, ['Desktop', 'Laptop', 'Printer'], true)) {
+                $headers = $sheets[$sheet][1];
+                $counts = array_count_values(array_map(static fn (string $v): string => mb_strtoupper(trim($v)), $headers));
+                foreach (array_unique([...array_keys($headers), ...array_keys($cells)]) as $column) {
+                    if (in_array($column, $mapped, true)) continue;
+                    $header = trim($headers[$column] ?? '') ?: "Column $column";
+                    if (($counts[mb_strtoupper($header)] ?? 0) > 1) $header .= " ($column)";
+                    $specs[$header] = $cells[$column] ?? '';
                 }
             }
             $data['specifications'] = $specs;
@@ -129,10 +128,10 @@ final class Workbook
                 'import_key' => "inventory2026:$sheet:$row:$component",
                 'device_type' => $component, 'name' => '', 'serial_number' => null, 'asset_tag' => null,
                 'device_condition' => 'Unknown', 'location' => null,
-                'holder_kind' => $sheet === 'Printer' ? 'shared' : (self::value($cells['A'] ?? null) ? 'imported' : 'unassigned'),
-                'hr_employee_id' => null, 'holder_name' => $sheet === 'Printer' ? null : self::value($cells['A'] ?? null),
-                'department' => self::value($cells['B'] ?? null), 'branch' => null,
-                'job_title' => $sheet === 'Printer' ? null : self::value($cells['C'] ?? null),
+                'holder_kind' => $sheet === 'Printer' ? 'shared' : (self::value($cells[$sheet === 'PC' ? $pcColumns['A'] : 'A'] ?? null) ? 'imported' : 'unassigned'),
+                'hr_employee_id' => null, 'holder_name' => $sheet === 'Printer' ? null : self::value($cells[$sheet === 'PC' ? $pcColumns['A'] : 'A'] ?? null),
+                'department' => self::value($cells[$sheet === 'PC' ? $pcColumns['B'] : 'B'] ?? null), 'branch' => null,
+                'job_title' => $sheet === 'Printer' ? null : self::value($cells[$sheet === 'PC' ? $pcColumns['C'] : 'C'] ?? null),
                 'specifications' => [], 'source' => ['sheet' => $sheet, 'row' => $row, 'cells' => $cells],
             ], $data);
         };
@@ -147,30 +146,36 @@ final class Workbook
             if ($row === 1) {
                 continue;
             }
-            if (self::value($cells['G'] ?? null) || self::value($cells['E'] ?? null)) {
-                $add('PC', $row, 'Desktop', $cells, ['name' => 'Desktop system unit', 'asset_tag' => self::value($cells['G'] ?? null),
-                    'specifications' => ['CPU' => $cells['E'] ?? '', 'RAM' => $cells['D'] ?? '', 'Storage' => $cells['F'] ?? '',
-                        'OS' => $cells['W'] ?? '', 'MAC address' => $cells['U'] ?? '']]);
+            $pc = [];
+            foreach ($pcColumns as $field => $column) $pc[$field] = $column === null ? '' : ($cells[$column] ?? '');
+            if (self::value($pc['G']) || self::value($pc['E'])) {
+                $add('PC', $row, 'Desktop', $cells, ['name' => 'Desktop system unit', 'asset_tag' => self::value($pc['G']),
+                    'specifications' => ['CPU' => $pc['E'], 'RAM' => $pc['D'], 'Storage' => $pc['F'],
+                        'OS' => $pc['W'], 'MAC address' => $pc['U']]]);
             }
             foreach (['Keyboard' => ['H', 'I', 'J'], 'Mouse' => ['K', 'L', 'M']] as $type => [$brandColumn, $serialColumn, $tagColumn]) {
-                $brand = self::value($cells[$brandColumn] ?? null);
-                $serial = self::value(preg_replace('/^SN\s*:\s*/i', '', $cells[$serialColumn] ?? ''));
-                $tag = self::value($cells[$tagColumn] ?? null);
+                $brand = self::value($pc[$brandColumn]);
+                if ($pcColumns[$tagColumn] === null) {
+                    [$serial, $tag] = self::identifiers($pc[$serialColumn]);
+                } else {
+                    $serial = self::value(preg_replace('/^SN\s*:\s*/i', '', $pc[$serialColumn]));
+                    $tag = self::value($pc[$tagColumn]);
+                }
                 if ($brand || $serial || $tag) {
                     $add('PC', $row, $type, $cells, ['name' => trim(($brand ?? '') . ' ' . strtolower($type)),
                         'serial_number' => $serial, 'asset_tag' => $tag]);
                 }
             }
-            $count = max((int) ($cells['N'] ?? 0), self::value($cells['R'] ?? null) ? 2 : (self::value($cells['Q'] ?? null) ? 1 : 0));
+            $count = max((int) $pc['N'], self::value($pc['R']) ? 2 : (self::value($pc['Q']) ? 1 : 0));
             if ($count > 2) {
-                throw new RuntimeException("PC row $row lists more than two monitors; review the workbook.");
+                throw new ValidationException("PC row $row lists more than two monitors; review the workbook.");
             }
             for ($monitor = 1; $monitor <= $count; $monitor++) {
-                [$serial, $tag] = self::identifiers($cells[$monitor === 1 ? 'Q' : 'R'] ?? null);
+                [$serial, $tag] = self::identifiers($pc[$monitor === 1 ? 'Q' : 'R']);
                 $add('PC', $row, "Monitor$monitor", $cells, ['device_type' => 'Monitor',
-                    'name' => trim((self::value($cells['P'] ?? null) ?? '') . ' monitor'),
+                    'name' => trim((self::value($pc['P']) ?? '') . ' monitor'),
                     'serial_number' => $serial, 'asset_tag' => $tag,
-                    'specifications' => ['Size (workbook)' => $cells['O'] ?? '', 'Display' => (string) $monitor]]);
+                    'specifications' => ['Size (workbook)' => $pc['O'], 'Display' => (string) $monitor]]);
             }
         }
         foreach ($sheets['Laptop'] as $row => $cells) {
@@ -182,6 +187,35 @@ final class Workbook
                     'OS' => $cells['J'] ?? '', 'MAC address' => $cells['I'] ?? '']]);
         }
         return $records;
+    }
+
+    private static function pcColumns(array $headers): array
+    {
+        // Logical slots retain the legacy component mapping; physical columns come from headers.
+        $normalize = static fn (string $header): string => strtoupper(preg_replace('/\s+/', ' ', trim($header)));
+        $available = [];
+        foreach ($headers as $column => $header) $available[$normalize($header)][] = $column;
+        $find = static function (array $names) use ($available): string {
+            $matches = [];
+            foreach ($names as $name) array_push($matches, ...($available[$name] ?? []));
+            if (count($matches) !== 1) throw new ValidationException('PC sheet needs exactly one header for ' . implode(' or ', $names) . '.');
+            return $matches[0];
+        };
+        $columns = [];
+        foreach (['A' => 'NAME', 'B' => 'DEPARTMENT', 'C' => 'POSITION', 'D' => 'RAM', 'E' => 'CPU',
+            'F' => 'STORAGE', 'G' => 'SYSTEM UNIT ASSET TAG', 'K' => 'MOUSE BRAND', 'N' => 'MONITOR COUNT',
+            'O' => 'MONITOR SIZE', 'P' => 'MONITOR BRAND', 'Q' => 'MONITOR 1 ASSET TAG',
+            'R' => 'MONITOR 2 ASSET TAG', 'U' => 'MAC ADDRESS', 'W' => 'OS'] as $field => $header) {
+            $columns[$field] = $find([$header]);
+        }
+        $columns['H'] = $find(['KEY BOARD BRAND', 'KEYBOARD BRAND']);
+        foreach (['KEYBOARD' => ['I', 'J'], 'MOUSE' => ['L', 'M']] as $type => [$serial, $tag]) {
+            $columns[$serial] = $find(["$type SERIAL NO#", "$type SERIAL NO#/ASSET TAG"]);
+            $combined = $normalize($headers[$columns[$serial]]) === "$type SERIAL NO#/ASSET TAG";
+            $columns[$tag] = $combined ? null : $find(["$type ASSET TAG"]);
+            if ($combined && isset($available["$type ASSET TAG"])) throw new ValidationException("PC sheet mixes combined and separate $type identifier columns.");
+        }
+        return $columns;
     }
 
     public static function summary(array $records): array

@@ -17,11 +17,19 @@ Both table groups live in `attendance_monitoring`. PHP reads `config.local.php` 
 
 `HrDirectory` is the only adapter to the timekeeping schema. Its fixed SELECT reads `employees`, `departments`, `branches`, and `branch_employee`. Numeric `employees.id` identifies an assignment; `employee_id` is the visible employee number. `position` is the job title and `role` is the HR access role. Branch selection uses the primary pivot row, then the first pivot row, then the legacy `employees.branch` field. Names match the existing HR model's first-name plus last-name display. Passwords, birthdays, attendance, and biometrics are excluded.
 
-`Workbook` reads the bundled XLSX through ZipArchive and SimpleXML for optional initial seeding. It verifies the expected sheet headers, reads keyboard/mouse serials and asset tags from separate columns, separates any combined monitor identifiers, splits PC rows into components, and retains raw row cells. The import is append-only with stable original sheet/row/component keys. Reruns skip existing keys; they do not overwrite corrections. Unknown condition, location, date, or employee ID is never inferred.
+`Workbook` reads XLSX through ZipArchive and SimpleXML. It verifies original sheet headers, maps component identifiers, splits PC rows, retains raw row cells, and includes all additional specification columns. Software belongs to desktops/laptops; duplicate and unnamed headers retain column identity. CLI seeding stays append-only with stable sheet/row/component keys and skips existing keys. Website imports use the reviewed update flow below.
 
-After seeding, the website and inventory database are the source of current device details, assignments, and history. The application runs without the workbook; new devices are registered through the website. Workbook source JSON remains an original import snapshot after edits. Excel is not an ongoing update mechanism or a destination for website changes.
+The website and inventory database hold current device details, assignments, and history. The application runs without the bundled workbook. Excel updates and downloads are explicit user actions, never automatic synchronization. Original source JSON remains intact after updates.
 
-Workbook holders (`holder_kind: imported`) are accepted as assigned to the recorded names. They display as Assigned and are included in assigned counts and filters without requiring an HR employee ID. HR equipment counts use explicit numeric links; no fuzzy name matching is performed. Future assignment changes use the website's HR selector.
+Workbook holders (`holder_kind: imported`) are accepted as assigned to recorded names, included in assigned counts/filters without an HR ID. HR equipment counts use numeric links. Website import suggests unique case/whitespace-normalized name matches or valid existing links; all suggestions are editable and require grouped approval. There is no fuzzy matching or HR mutation. Blank selections retain holder snapshots.
+
+`ImportPreview` prepares groups against current inventory and HR. It detects conflicting links and repeated targets, captures versions, and issues a random session-bound token with a 30-minute expiry. Changing HR selections merges groups in the browser; approval submits original group IDs plus the chosen numeric employee IDs. One active preview is kept server-side, and successful approval releases it. Parsed rows never come back from the browser as mutation payloads.
+
+PC component fields are resolved by case/whitespace-normalized header names instead of fixed physical columns. The reader accepts separate accessory serial/tag headers or combined `SERIAL NO#/ASSET TAG` headers; combined cells use the existing identifier splitter. Missing, ambiguous, or mixed identifier headers are rejected. Actual mapped columns are excluded from additional specifications, so shifted OS/MAC/software fields retain their meaning. Component source keys remain stable and source cells retain their original column positions.
+
+`InventoryService::applyImport` owns the grouped transaction: replace imported device information/specifications, update assignments, and write an event per device. Original-format updates preserve condition/location/handover date. Source JSON and device IDs remain intact; import-update events include incoming rows and before/after snapshots. Existing versions are checked, and new original source keys are checked again before insert. A stale/conflicting device or failed history insert rolls back every selected group. Devices absent from the selected rows are untouched. Identifiers/names never determine device identity.
+
+`WorkbookExchange` writes a string-only XLSX with a Devices sheet, one row per device, stable Inventory ID/Source key columns, assignment/location/date fields, and the union of current specifications prefixed `Spec: `. Explicit IDs must exist and agree with source keys on reimport; new rows clear both metadata fields. Export resolves current HR holder details while retaining deleted employee snapshots. Formula-like strings remain literal, and leading zeros/multiline values survive roundtrips. Temporary exports live outside public/ in storage/ and are deleted after streaming. No schema changes or third-party dependencies are required.
 
 HR's `departments` table owns the department directory. `HrDirectory::departments()` returns its complete ID/name projection; dropdowns do not merge workbook labels or derive departments from the employee list. Inventory stores `department_id` plus a canonical `department` snapshot, with no cascading HR foreign key. Shared assignment validates the department ID; employee assignment takes the employee's HR department ID. API display resolves stored IDs or unique formatting variants to current HR names while retaining snapshots for deleted departments. Explicit aliases handle confirmed abbreviations; ambiguous or unknown names are rejected on import or reconciliation.
 
@@ -37,7 +45,7 @@ The browser loads the full initial dataset because the workbook contains only 21
 
 ## Endpoint contract
 
-All routes use `public/api.php?action=...`, return JSON, and accept same-origin requests. Success is `{ "data": ... }`; failure is `{ "error": "message" }` with the appropriate HTTP status. GET responses and the page are uncached. POST requires `Content-Type: application/json` and `X-CSRF-Token` from the page's meta tag.
+All routes use `public/api.php?action=...` and accept same-origin requests. Success is `{ "data": ... }`; failure is `{ "error": "message" }` with the appropriate HTTP status. Export returns XLSX on success. GET responses and the page are uncached. POST requires JSON and `X-CSRF-Token`, except import-preview which uses multipart form data with the same CSRF header. JSON requests are capped at 1 MiB to support larger specification edits.
 
 | Action | Method | Input | Result |
 |---|---|---|---|
@@ -46,6 +54,11 @@ All routes use `public/api.php?action=...`, return JSON, and accept same-origin 
 | `device` | POST | Type, name, condition; optional serial, tag, location branch ID, specifications; `id` and `version` for edit | Saved device |
 | `assignment` | POST | `id`, `version`, holder kind; employee ID or shared `department_id`; optional handover date/notes | Saved device |
 | `note` | POST | `id`, nonempty `message` up to 2,000 characters | `saved: true` |
+| `import-preview` | POST | Multipart `workbook` XLSX, up to 5 MiB | Token, expiry, groups with incoming devices/current snapshots, projected employees |
+| `import-apply` | POST | `token`, `groups`: each has `id`, `hr_employee_id` (nullable), and `resolved` for conflicts | `added`, `updated`; one atomic approval |
+| `export` | GET | None | XLSX download of all current devices |
+
+Workbook ZIPs allow up to 256 entries and 32 MiB expanded contents; previews allow 2,000 devices. Missing/malformed original or export headers and invalid workbooks return validation errors. Specifications support 128 populated fields, names up to 100 characters, and values up to 4,000 characters. Excess data is rejected instead of truncated. Expired previews and stale devices return 409.
 
 The editable device wire fields are `device_type`, `name`, `device_condition`, `serial_number`, `asset_tag`, `location_branch_id`, and `specifications` (a name/value map). Location IDs are validated against HR branches; blank/null clears the location. Legacy text `location` input is still accepted and clears its branch link. Omitting both location fields on edit preserves the current location. Accepted types/conditions are declared in `InventoryService`. Holder kinds accepted by assignment are `employee`, `shared`, and `unassigned`; `imported` is reserved for workbook imports. The employee input is `hr_employee_id`. Handover dates are optional real `YYYY-MM-DD` dates, distinct from server-recorded timestamps.
 
@@ -55,7 +68,7 @@ Shared assignment uses numeric `department_id`. Legacy `department` text input i
 
 ## Later work
 
-Workbook holder names remain assigned snapshots until staff change them through the regular assignment flow. No employee ID is inferred from a name. That flow validates the selected numeric HR ID and records changes atomically; HR remains read-only.
+Workbook holder names remain snapshots until staff link/reassign them through regular assignment or approve an Excel group with an HR selection. Both flows validate numeric HR IDs and record changes atomically; HR remains read-only.
 
 `Auth` authenticates against `attendance_monitoring.users` through authentication-only SELECT projections in `HrDirectory`. Users sign in with their attendance username or email and existing password, verified using PHP `password_verify`; only `is_admin` or `is_it_admin` users are allowed. They receive inventory editor access. Other users cannot access the page or API. `employees.role` remains directory display data. User creation, password changes, and admin flags are managed in attendance; inventory never updates HR users or their password hashes. Neither hashes nor credential projections reach directory/API responses.
 

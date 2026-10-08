@@ -31,6 +31,7 @@ if (!$user) {
   <link rel="stylesheet" href="assets/readability.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/readability.css'), 0, 12) ?>">
   <script src="assets/model.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/model.js'), 0, 12) ?>" defer></script>
   <script src="assets/app.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/app.js'), 0, 12) ?>" defer></script>
+  <script src="assets/import.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/import.js'), 0, 12) ?>" defer></script>
 </head>
 <body data-role="<?= $user['role'] ?>">
 <div class="app-shell">
@@ -50,7 +51,8 @@ if (!$user) {
   <main>
     <header class="topbar"><span>Workspace <span class="slash">/</span><strong id="breadcrumb">Devices</strong></span><button class="button" id="refresh">Refresh</button></header>
     <div class="page-content">
-      <div class="page-heading"><div><h1 id="page-title">Devices</h1><p id="page-description">Equipment and the people who hold it.</p></div><button class="button primary" id="add-device" disabled>＋ Add device</button></div>
+      <div class="page-heading"><div><h1 id="page-title">Devices</h1><p id="page-description">Equipment and the people who hold it.</p></div><div class="action-row"><button class="button" id="import-excel">Import Excel</button><a class="button" href="api.php?action=export">Export Excel</a><button class="button primary" id="add-device" disabled>＋ Add device</button></div></div>
+      <div id="notice" role="status" hidden></div>
       <div id="error" role="alert" hidden></div>
       <div id="stats" class="stats"></div>
       <div id="inventory-layout" class="inventory-layout">
@@ -79,5 +81,18 @@ if (!$user) {
   </form>
 </dialog>
 <noscript><p>Enable JavaScript to use inventory.</p></noscript>
+<dialog id="import-dialog" class="modal import-modal" aria-labelledby="import-title">
+  <form id="import-form">
+    <div class="modal-header"><div><h2 id="import-title">Import Excel</h2><p>Review holders and approve their devices together.</p></div><button type="button" class="close-button" id="close-import" aria-label="Close import">×</button></div>
+    <div class="modal-body">
+      <label>Excel workbook<input id="import-file" name="workbook" type="file" accept=".xlsx" required></label>
+      <p class="source-hint">Up to 5 MiB, subject to the server upload limit. Original workbook rows identify devices: keep their row order when updating. Specifications in approved rows replace current specifications; blank cells clear values. Equipment absent from the upload stays unchanged.</p>
+      <button type="submit" class="button" id="preview-import">Preview workbook</button>
+      <div id="import-review" hidden><p id="import-summary"></p><div class="action-row"><button type="button" class="text-button" id="select-import">Select all</button><button type="button" class="text-button" id="clear-import">Clear selection</button></div><div id="import-groups"></div></div>
+      <p id="import-error" role="alert" hidden></p>
+    </div>
+    <div class="modal-footer"><span id="import-status">Nothing is saved until approval.</span><div><button type="button" class="button" id="cancel-import">Cancel</button><button type="button" class="button primary" id="approve-import" disabled>Approve selected groups</button></div></div>
+  </form>
+</dialog>
 </body>
 </html>

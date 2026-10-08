@@ -202,18 +202,28 @@
       `<div class="field-row"><label>Device type<select name="device_type">${options(types, device?.device_type || 'Laptop')}</select></label>${field('Brand / model *', 'name', device?.name, 'required')}</div>
       <div class="field-row">${field('Serial number', 'serial_number', device?.serial_number)}${field('Asset tag', 'asset_tag', device?.asset_tag)}</div>
       <div class="field-row"><label>Condition<select name="device_condition">${options(conditions, device?.device_condition || 'Unknown')}</select></label><label>Location<select name="location_branch_id"><option value="">Not recorded</option>${locationOptions}</select></label></div>
-      <label>Specifications (one 'Name: value' per line)<textarea name="specs" rows="5">${esc(Object.entries(device?.specifications || {}).map(([key, value]) => `${key}: ${value}`).join('\n'))}</textarea><small>Example: CPU: Intel i5-1235U</small></label>`, async form => {
-        const specifications = {};
-        for (const line of form.specs.split('\n').filter(line => line.trim())) {
-          const colon = line.indexOf(':');
-          if (colon < 1) throw new Error('Write each specification as Name: value.');
-          specifications[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+      <div><h3>Specifications</h3><small>Hardware and software, including OS, LICENSE, MICROSOFT 365, ANTI VIRUS, SAP, ADOBE, and VIBER. Up to 128 fields; blank values are cleared.</small><div id="spec-editor"></div><button type="button" class="button" id="add-specification">Add specification</button></div>`, async form => {
+        const specifications = Object.create(null);
+        for (const row of $('#spec-editor').querySelectorAll('[data-spec-row]')) {
+          const key = row.querySelector('input').value.trim();
+          const value = row.querySelector('textarea').value.trim();
+          if (!key && !value) continue;
+          if (!key) throw new Error('Give each specification a name.');
+          if (Object.hasOwn(specifications, key)) throw new Error(`Repeated specification: ${key}`);
+          specifications[key] = value;
         }
-        const { specs: unused, ...values } = form;
-        const saved = await request('device', 'POST', { ...values, specifications,
+        const saved = await request('device', 'POST', { ...form, specifications,
           ...(device ? { id: device.id, version: device.version } : {}) });
         selected = saved.id;
       });
+    const addSpec = (key = '', value = '') => {
+      if ($('#spec-editor').querySelectorAll('[data-spec-row]').length >= 128) return;
+      $('#spec-editor').insertAdjacentHTML('beforeend', `<div class="spec-edit-row" data-spec-row><label>Specification name<input maxlength="100" value="${esc(key)}"></label><label>Value<textarea rows="2" maxlength="4000">${esc(value)}</textarea></label><button type="button" class="text-button" data-remove-spec>Remove</button></div>`);
+    };
+    for (const [key, value] of Object.entries(device?.specifications || {})) addSpec(key, value);
+    if (!device) for (const key of ['CPU', 'RAM', 'Storage', 'OS', 'LICENSE', 'MICROSOFT 365', 'ANTI VIRUS', 'SAP', 'ADOBE', 'VIBER']) addSpec(key);
+    $('#add-specification').addEventListener('click', () => addSpec());
+    $('#spec-editor').addEventListener('click', event => { if (event.target.closest('[data-remove-spec]')) event.target.closest('[data-spec-row]').remove(); });
   }
 
   function assignDevice() {
@@ -292,6 +302,7 @@
     }
   });
   $('#search').addEventListener('input', render);
+  document.addEventListener('inventory-imported', reload);
   ['#type-filter', '#people-sort', '#department-filter', '#branch-filter', '#status-filter'].forEach(selector => $(selector).addEventListener('change', render));
   $('#type-filter').innerHTML += options(types);
   reload();
