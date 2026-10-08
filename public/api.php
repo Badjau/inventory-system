@@ -13,8 +13,8 @@ try {
     Http::start(is_file($localConfig) ? require $localConfig : ['local_only' => true]);
     $action = $_GET['action'] ?? 'state';
     $method = $_SERVER['REQUEST_METHOD'];
-    $getActions = ['state', 'history', 'export'];
-    $postActions = ['device', 'assignment', 'note', 'import-preview', 'import-apply'];
+    $getActions = ['state', 'history', 'export', 'evidence'];
+    $postActions = ['associate', 'device', 'assignment', 'note', 'import-preview', 'import-apply'];
     if (!is_string($action) || !in_array($action, [...$getActions, ...$postActions], true)) {
         throw new ValidationException('Endpoint not found.', 404);
     }
@@ -24,10 +24,42 @@ try {
         throw new ValidationException('Method not allowed.', 405);
     }
     Inventory\Auth::authorize(Inventory\Auth::current(), $method === 'POST');
-    $input = $method === 'POST' && $action !== 'import-preview' ? Http::input() : [];
+    $multipartDevice = $action === 'device' && str_starts_with(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data');
+    $input = $method === 'POST' && $action !== 'import-preview' && !$multipartDevice ? Http::input() : [];
+    if ($multipartDevice) {
+        Http::verifyToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '', $_SESSION['csrf'] ?? '');
+        $payload = $_POST['device'] ?? null;
+        if (!is_string($payload) || strlen($payload) > 1048576) throw new ValidationException('Upload too large or missing device details. Check PHP post_max_size.', 413);
+        try { $input = json_decode($payload, true, 32, JSON_THROW_ON_ERROR); }
+        catch (JsonException) { throw new ValidationException('Invalid device details.'); }
+        if (!is_array($input) || !str_starts_with(ltrim($payload), '{')) throw new ValidationException('Send a device object.');
+    }
     $db = Database::connect(inventory_config()['database']);
     $service = new InventoryService($db);
     $hr = new HrDirectory($db);
+    if ($action === 'evidence') {
+        $eventId = InventoryService::positiveInt($_GET['event'] ?? null, 'event ID');
+        $index = filter_var($_GET['photo'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        if ($index === false || $index === null) throw new ValidationException('Invalid photo index.');
+        $query = $db->prepare('SELECT snapshot_json FROM inv_events WHERE id = ?');
+        $query->execute([$eventId]);
+        $snapshot = $query->fetchColumn();
+        $photo = $snapshot === false ? null : (json_decode($snapshot, true, 512, JSON_THROW_ON_ERROR)['evidence_photos'][$index] ?? null);
+        if (!$photo || !preg_match('/^[a-f0-9]{32}\.(jpg|png|webp)$/D', $photo['file'] ?? '')) throw new ValidationException('Photo not found.', 404);
+        $path = Inventory\EvidencePhotos::directory() . '/' . $photo['file'];
+        if (!is_file($path)) throw new ValidationException('Photo not found.', 404);
+        header('Content-Type: ' . $photo['mime']);
+        header('Content-Disposition: inline; filename="evidence.' . pathinfo($path, PATHINFO_EXTENSION) . '"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path);
+        exit;
+    }
+    if ($action === 'device') {
+        $photos = $multipartDevice ? Inventory\EvidencePhotos::receive($_FILES['photos'] ?? null) : [];
+        try { $saved = $service->save($input, $photos); }
+        catch (Throwable $error) { Inventory\EvidencePhotos::discard($photos); throw $error; }
+        Http::json(['data' => $saved]);
+    }
     $departments = $hr->departments();
     $departmentNames = Inventory\DepartmentNames::configured($departments);
     if ($action === 'export') {
@@ -37,6 +69,7 @@ try {
             $employees = array_column($hr->all(), null, 'id');
             $devices = array_map($departmentNames->display(...), $service->devices());
             foreach ($devices as &$device) {
+                if ($device['holder_kind'] === 'associate') $device['branch'] = 'Other';
                 $employee = $employees[$device['hr_employee_id']] ?? null;
                 if ($device['holder_kind'] === 'employee' && $employee) {
                     foreach (['department', 'department_id', 'branch', 'job_title'] as $field) $device[$field] = $employee[$field];
@@ -72,9 +105,9 @@ try {
     }
     $data = match ($action) {
         'state' => ['devices' => array_map($departmentNames->display(...), $service->devices()),
-            'employees' => $hr->all(), 'departments' => $departments, 'branches' => $hr->branches(), 'activity' => $service->history()],
+            'employees' => $hr->all(), 'associates' => (new Inventory\Associates($db))->all(), 'departments' => $departments, 'branches' => $hr->branches(), 'activity' => $service->history()],
+        'associate' => (new Inventory\Associates($db))->add($input),
         'history' => $service->history(InventoryService::positiveInt($_GET['id'] ?? null, 'device ID')),
-        'device' => $service->save($input),
         'assignment' => $service->assign($input, $hr),
         'note' => (static function () use ($service, $input): array { $service->note($input); return ['saved' => true]; })(),
     };

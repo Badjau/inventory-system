@@ -8,6 +8,12 @@ The app uses PHP 8.3, PDO, MySQL, and plain HTML/CSS/JavaScript. Employee detail
 
 ## Start from Laragon Terminal
 
+Inventory associates use the inventory-only **Other** branch automatically, including existing associates. Select **Other** in the branch filter to find their People records or assigned equipment. HR branches and equipment location choices remain managed by the HR directory.
+
+People's **Add User** creates an inventory-only associate with a name and optional job title/affiliation. Associates appear alongside HR employees and can hold equipment through **Assign / return → Inventory associate**. They do not create attendance employees or login accounts. Run `php tools/setup.php` after updating to create `inv_associates` and add the nullable `inv_devices.associate_id` column. Existing HR records, device IDs, and history are preserved.
+
+Associate smoke check: add an associate in People, reload, assign a test device to them, use View devices to confirm the count, export/reimport that device, then return it and confirm the old name remains in history. Verify the attendance employee directory is unchanged. Check Add User validation, keyboard access, Escape, and mobile layout.
+
 PHP 8.3 with `pdo_mysql`, `zip`, `simplexml`, and `mbstring` is required. These extensions were found in the installed Laragon PHP. Composer, npm, Python, and a virtual environment are not needed. Node is optional for JavaScript checks.
 
 1. Start Laragon's MySQL service. Open **Laragon Terminal**, then run:
@@ -93,6 +99,10 @@ Excel browser smoke checks (run with MySQL/Laragon available):
 Implementation verification: PHP lint and 1,344 isolated SQLite assertions passed, including both PC layouts and all current workbook software columns; JavaScript syntax and 49 frontend assertions passed in the V8 fallback. Fixed count/history regressions use the archived `INVENTORY 2026.xlsx.before-department-cleanup.2.xlsx` baseline so editing the working workbook does not invalidate them. Required native Node commands abort with `ncrypto::CSPRNG` initialization failure, MySQL tests/doctor fail with PDO 2002, and the PHP server cannot bind localhost. Actual Excel/browser/LAN smoke checks remain unverified in this environment.
 
 ## Checks
+
+Device creation and editing support optional evidence photos: choose up to five JPEG, PNG or WebP files, at most 2 MiB each. History shows clickable thumbnails with the corresponding saved change. PHP `post_max_size` must accommodate the combined upload plus device details, `upload_max_filesize` must allow 2 MiB, and `max_file_uploads` must allow five files. Apache/PHP needs write access to `storage/evidence/`, created automatically. Include that directory in inventory backups; photos are not included in Excel exports.
+
+Evidence smoke checks: create a device with multiple photos, edit it with another photo, reload and open each history thumbnail. Save without photos and confirm earlier evidence remains. Try an invalid file, oversized photo, six photos, and a stale edit; confirm errors leave device/history unchanged. Check cancel, keyboard access, mobile layout, and that signed-out photo URLs return 401.
 
 The workbook's 90 department cells were standardized using the HR names supplied by the user. A subsequent live HR preview confirmed the exact spelling **Credit and Collections**, and eight cells were corrected to match. Beverage and Sales-Beverage remain separate; Accounting and Credit and Collections remain separate. SALES MEAT maps to Sales-Frozen. The first backup is `INVENTORY 2026.xlsx.before-department-cleanup.xlsx`; later changes preserve existing backups and create numbered backups such as `.before-department-cleanup.2.xlsx`. All other cell values, row numbers, and device identifiers were verified unchanged.
 

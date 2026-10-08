@@ -25,6 +25,9 @@
   const badge = device => `<span class="status ${device.holder_kind === 'unassigned' ? 'available' : 'assigned'}">${status(device)}</span>`;
   const conditionBadge = device => `<span class="status ${attention(device) ? 'repair' : device.device_condition === 'Good' ? 'available' : 'unknown'}">${esc(device.device_condition)}</span>`;
   const devices = () => state.devices.map(device => displayDevice(device, state.employees, state.branches));
+  // Negative keys distinguish inventory associates from numeric HR IDs in UI filters only.
+  const people = () => [...state.employees, ...(state.associates || []).map(person => ({ ...person,
+    id: -Number(person.id), employee_id: 'Associate', hr_role: 'Inventory only', department: '', branch: 'Other' }))];
   const chosen = () => devices().find(device => device.id === selected);
   const options = (values, selectedValue = '') => values.map(value => `<option value="${esc(value)}"${value === selectedValue ? ' selected' : ''}>${esc(value)}</option>`).join('');
   const field = (label, name, value = '', extra = '') => `<label>${esc(label)}<input name="${esc(name)}" value="${esc(value)}" maxlength="255" ${extra}></label>`;
@@ -32,8 +35,8 @@
   async function request(action, method = 'GET', data = null) {
     if (method === 'POST' && !canEdit) throw new Error('This account has read-only access.');
     const response = await fetch(`api.php?action=${action}`, {
-      method, credentials: 'same-origin', headers: method === 'POST' ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {},
-      ...(method === 'POST' ? { body: JSON.stringify(data) } : {})
+      method, credentials: 'same-origin', headers: method === 'POST' ? { ...(data instanceof FormData ? {} : { 'Content-Type': 'application/json' }), 'X-CSRF-Token': csrf } : {},
+      ...(method === 'POST' ? { body: data instanceof FormData ? data : JSON.stringify(data) } : {})
     });
     if (response.status === 401) {
       window.location.assign('login.php');
@@ -56,7 +59,7 @@
     try {
       state = await request('state');
       const departments = [...new Set(state.departments.map(row => row.name))];
-      const branches = [...new Set(state.branches.map(row => row.name))];
+      const branches = [...new Set([...state.branches.map(row => row.name), 'Other'])];
       const currentDepartment = $('#department-filter').value;
       const currentBranch = $('#branch-filter').value;
       $('#department-filter').innerHTML = '<option value="">All departments</option>' + options(departments);
@@ -76,7 +79,7 @@
 
   function renderStats(rows) {
     $('#count-devices').textContent = rows.length;
-    $('#count-people').textContent = state.employees.length;
+    $('#count-people').textContent = people().length;
     $('#count-shared').textContent = rows.filter(device => device.holder_kind === 'shared').length;
     const cards = [
       ['total', 'Total devices', rows.length, 'Individual inventory items'],
@@ -94,8 +97,9 @@
     renderStats(rows);
     $('#page-title').textContent = titles[view];
     $('#breadcrumb').textContent = titles[view];
-    const filteredEmployee = state.employees.find(employee => Number(employee.id) === Number(employeeFilter));
-    $('#page-description').textContent = view === 'people' ? 'Employee details are managed in timekeeping.' :
+    $('#add-device').textContent = view === 'people' ? '＋ Add User' : '＋ Add device';
+    const filteredEmployee = people().find(employee => Number(employee.id) === Number(employeeFilter));
+    $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users stay in inventory only.' :
       view === 'activity' ? 'The latest 100 inventory changes. Select a device to see its full history.' :
       filteredEmployee ? `Equipment assigned to ${filteredEmployee.name}.` : 'Equipment and the people who hold it.';
     $('#search').placeholder = view === 'people' ? 'Search name, employee number, branch, department, or role…' :
@@ -126,11 +130,11 @@
     const query = $('#search').value.toLocaleLowerCase().trim();
     const department = $('#department-filter').value;
     const branch = $('#branch-filter').value;
-    const employees = state.employees.filter(employee => (!department || employee.department === department) && (!branch || employee.branch === branch) &&
+    const employees = people().filter(employee => (!department || employee.department === department) && (!branch || employee.branch === branch) &&
       (!query || [employee.name, employee.employee_id, employee.branch, employee.department, employee.job_title, employee.hr_role].join(' ').toLocaleLowerCase().includes(query)));
     const equipmentCounts = new Map();
     rows.forEach(device => {
-      const employeeId = Number(device.hr_employee_id);
+      const employeeId = device.holder_kind === 'associate' ? -Number(device.associate_id) : Number(device.hr_employee_id);
       if (employeeId) equipmentCounts.set(employeeId, (equipmentCounts.get(employeeId) || 0) + 1);
     });
     const equipmentCount = employee => equipmentCounts.get(Number(employee.id)) || 0;
@@ -140,13 +144,13 @@
         sort === 'has-first' ? Number(equipmentCount(b) > 0) - Number(equipmentCount(a) > 0) : 0;
       return countOrder || a.name.localeCompare(b.name);
     });
-    $('#table-head').innerHTML = '<tr><th>Employee</th><th>Branch</th><th>Department</th><th>Job title / HR role</th><th>Equipment</th></tr>';
+    $('#table-head').innerHTML = '<tr><th>Person</th><th>Branch</th><th>Department</th><th>Job title / HR role</th><th>Equipment</th></tr>';
     $('#table-body').innerHTML = employees.map(employee => `<tr><td>${esc(employee.name)}<small>${esc(employee.employee_id)}</small></td><td>${esc(employee.branch || 'Not set')}</td><td>${esc(employee.department || 'Not set')}</td><td>${esc(employee.job_title)}<small>${esc(employee.hr_role)}</small></td><td><button class="button" data-person="${Number(employee.id)}">View devices (${equipmentCount(employee)})</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">No employees match your filters.</td></tr>';
-    $('#table-footer').textContent = `${employees.length} employees · Live HR directory`;
+    $('#table-footer').textContent = `${employees.length} people · HR employees and inventory associates`;
   }
 
   function eventsMarkup(events) {
-    return events.map(event => `<div class="timeline-item"><span class="timeline-dot"></span><strong>${esc(event.message)}</strong><small>Recorded ${esc(event.recorded_at)}${event.handover_date ? ` · Handover ${esc(event.handover_date)}` : ''}</small></div>`).join('') || '<p class="empty-state">No history recorded.</p>';
+    return events.map(event => `<div class="timeline-item"><span class="timeline-dot"></span><strong>${esc(event.message)}</strong><small>Recorded ${esc(event.recorded_at)}${event.handover_date ? ` · Handover ${esc(event.handover_date)}` : ''}</small><div class="evidence-photos">${(event.photos || []).map((photo, index) => `<a href="api.php?action=evidence&amp;event=${Number(event.id)}&amp;photo=${index}" target="_blank" rel="noopener"><img loading="lazy" src="api.php?action=evidence&amp;event=${Number(event.id)}&amp;photo=${index}" alt="${esc(photo.name || 'Evidence photo')}"></a>`).join('')}</div></div>`).join('') || '<p class="empty-state">No history recorded.</p>';
   }
 
   function renderActivity() {
@@ -202,6 +206,7 @@
       `<div class="field-row"><label>Device type<select name="device_type">${options(types, device?.device_type || 'Laptop')}</select></label>${field('Brand / model *', 'name', device?.name, 'required')}</div>
       <div class="field-row">${field('Serial number', 'serial_number', device?.serial_number)}${field('Asset tag', 'asset_tag', device?.asset_tag)}</div>
       <div class="field-row"><label>Condition<select name="device_condition">${options(conditions, device?.device_condition || 'Unknown')}</select></label><label>Location<select name="location_branch_id"><option value="">Not recorded</option>${locationOptions}</select></label></div>
+      <label>Evidence photos (optional)<input id="evidence-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small>Up to 5 photos, 2 MiB each. JPEG, PNG or WebP. Saved photos appear in device history.</small></label><div id="evidence-selection" aria-live="polite"></div>
       <div><h3>Specifications</h3><small>Hardware and software, including OS, LICENSE, MICROSOFT 365, ANTI VIRUS, SAP, ADOBE, and VIBER. Up to 128 fields; blank values are cleared.</small><div id="spec-editor"></div><button type="button" class="button" id="add-specification">Add specification</button></div>`, async form => {
         const specifications = Object.create(null);
         for (const row of $('#spec-editor').querySelectorAll('[data-spec-row]')) {
@@ -212,10 +217,21 @@
           if (Object.hasOwn(specifications, key)) throw new Error(`Repeated specification: ${key}`);
           specifications[key] = value;
         }
-        const saved = await request('device', 'POST', { ...form, specifications,
-          ...(device ? { id: device.id, version: device.version } : {}) });
+        const files = Array.from($('#evidence-photos').files);
+        if (files.length > 5 || files.some(file => file.size > 2 * 1024 * 1024)) throw new Error('Choose up to 5 photos, no larger than 2 MiB each.');
+        const payload = { ...form, specifications, ...(device ? { id: device.id, version: device.version } : {}) };
+        let data = payload;
+        if (files.length) {
+          data = new FormData();
+          data.append('device', JSON.stringify(payload));
+          files.forEach(file => data.append('photos[]', file));
+        }
+        const saved = await request('device', 'POST', data);
         selected = saved.id;
       });
+    $('#evidence-photos').addEventListener('change', () => {
+      $('#evidence-selection').textContent = Array.from($('#evidence-photos').files).map(file => file.name).join(', ');
+    });
     const addSpec = (key = '', value = '') => {
       if ($('#spec-editor').querySelectorAll('[data-spec-row]').length >= 128) return;
       $('#spec-editor').insertAdjacentHTML('beforeend', `<div class="spec-edit-row" data-spec-row><label>Specification name<input maxlength="100" value="${esc(key)}"></label><label>Value<textarea rows="2" maxlength="4000">${esc(value)}</textarea></label><button type="button" class="text-button" data-remove-spec>Remove</button></div>`);
@@ -230,16 +246,19 @@
     const device = chosen();
     if (!device) return;
     openDialog('Assign / return equipment', device.name,
-      `<label>Assign to<select name="holder_kind" id="holder-kind"><option value="employee">HR employee</option><option value="shared">Shared department</option><option value="unassigned">Return to unassigned pool</option></select></label>
+      `<label>Assign to<select name="holder_kind" id="holder-kind"><option value="employee">HR employee</option><option value="associate">Inventory associate</option><option value="shared">Shared department</option><option value="unassigned">Return to unassigned pool</option></select></label>
+      <label id="associate-field" hidden>Associate<select name="associate_id"><option value="">Select an associate</option>${(state.associates || []).map(person => `<option value="${Number(person.id)}"${Number(person.id) === Number(device.associate_id) ? ' selected' : ''}>${esc(person.name)}</option>`).join('')}</select></label>
       <label id="employee-field">Employee<select name="hr_employee_id"><option value="">Select an employee</option>${state.employees.map(employee => `<option value="${Number(employee.id)}"${Number(employee.id) === device.hr_employee_id ? ' selected' : ''}>${esc(`${employee.name} · ${employee.employee_id} · ${employee.department}`)}</option>`).join('')}</select></label>
       <label id="department-field" hidden>Shared department<select name="department_id"><option value="">Select a department</option>${state.departments.map(department => `<option value="${Number(department.id)}"${Number(department.id) === device.department_id ? ' selected' : ''}>${esc(department.name)}</option>`).join('')}</select></label>
       <label>Handover date (if known)<input name="handover_date" type="date"><small>Leave blank if you are correcting an imported holder and the original date is unknown.</small></label>
       <label>Handover / return notes<textarea name="notes" rows="3" maxlength="2000"></textarea></label>`,
       async form => { await request('assignment', 'POST', { ...form, id: device.id, version: device.version }); });
     const selector = $('#holder-kind');
-    selector.value = device.holder_kind === 'shared' ? 'shared' : 'employee';
+    selector.value = ['shared', 'associate'].includes(device.holder_kind) ? device.holder_kind : 'employee';
     const updateFields = () => {
       $('#employee-field').hidden = selector.value !== 'employee';
+      $('#associate-field').hidden = selector.value !== 'associate';
+      $('#associate-field select').required = selector.value === 'associate';
       $('#department-field').hidden = selector.value !== 'shared';
       $('#employee-field select').required = selector.value === 'employee';
       $('#department-field select').required = selector.value === 'shared';
@@ -290,7 +309,14 @@
     if (target.dataset.person) { navigate('devices'); employeeFilter = Number(target.dataset.person); render(); }
     if (target.dataset.activityDevice) { navigate('devices'); selected = Number(target.dataset.activityDevice); render(); }
     if (target.id === 'refresh') reload();
-    if (target.id === 'add-device') editDevice();
+    if (target.id === 'add-device') {
+      if (view === 'people') {
+        openDialog('Add User', 'Create an inventory associate. This does not add an attendance employee or a login account.',
+          field('Full name *', 'name', '', 'required') + field('Job title / affiliation', 'job_title') +
+          '<label>Branch<input value="Other" readonly></label>',
+          async form => { await request('associate', 'POST', form); });
+      } else editDevice();
+    }
     if (target.id === 'edit-device') editDevice(chosen());
     if (target.id === 'assign-device') assignDevice();
     if (target.id === 'clear-person') { employeeFilter = null; render(); }

@@ -4,4 +4,5 @@
 /storage/*.json
 /storage/*.log
 /storage/*.xlsx
+/storage/evidence/
 /~$*

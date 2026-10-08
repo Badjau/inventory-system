@@ -39,9 +39,9 @@ final class ImportPreview
             $record['target_version'] = $before['version'] ?? null;
             $record['operation'] = $before ? 'Update' : 'Add';
             $record['before'] = $before;
-            $person = $record['holder_kind'] !== 'shared' && $record['holder_kind'] !== 'unassigned';
-            $bucket = $record['holder_kind'] === 'shared' ? 'shared:' . self::name($record['department'] ?? '') :
-                ($person ? 'name:' . self::name($record['holder_name'] ?? '') : 'unassigned');
+            $person = !in_array($record['holder_kind'], ['shared', 'unassigned', 'associate'], true);
+            $bucket = $record['holder_kind'] === 'associate' ? 'associate:' . ($record['associate_id'] ?? '') : ($record['holder_kind'] === 'shared' ? 'shared:' . self::name($record['department'] ?? '') :
+                ($person ? 'name:' . self::name($record['holder_name'] ?? '') : 'unassigned'));
             $link = ($record['exchange'] ?? false) ? $record['hr_employee_id'] : ($before['hr_employee_id'] ?? null);
             $link = isset($people[(int) $link]) && $person ? (int) $link : null;
             if (!$link && $person) {
@@ -84,7 +84,7 @@ final class ImportPreview
             $employeeId = $employeeId === null || $employeeId === '' ? null : InventoryService::positiveInt($employeeId, 'employee ID');
             if ($groups[$id]['conflict'] && !($selection['resolved'] ?? false)) throw new ValidationException('Resolve conflicting employee links before approving.');
             foreach ($groups[$id]['records'] as $record) {
-                if (in_array($record['holder_kind'], ['shared', 'unassigned'], true) && $employeeId !== null) throw new ValidationException('This group does not accept an employee link.');
+                if (in_array($record['holder_kind'], ['shared', 'unassigned', 'associate'], true) && $employeeId !== null) throw new ValidationException('This group does not accept an employee link.');
                 $record['approved_employee_id'] = $employeeId;
                 $records[] = $record;
             }

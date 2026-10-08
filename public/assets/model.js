@@ -8,6 +8,7 @@
   const displayDevice = (device, employees, branches = []) => {
     const locationBranch = branches.find(branch => Number(branch.id) === Number(device.location_branch_id));
     device = { ...device, location: locationBranch?.name || device.location };
+    if (device.holder_kind === 'associate') return { ...device, branch: 'Other' };
     if (device.holder_kind !== 'employee') return { ...device };
     const person = employees.find(employee => Number(employee.id) === Number(device.hr_employee_id));
     return person ? { ...device, holder_name: person.name, department: person.department, department_id: Number(person.department_id) || null,
@@ -21,7 +22,9 @@
       return (!query || text.includes(query)) && (!filter.type || device.device_type === filter.type) &&
         (!filter.department || device.department === filter.department) &&
         (!filter.branch || device.branch === filter.branch) &&
-        (!filter.employee || Number(device.hr_employee_id) === Number(filter.employee)) &&
+        (!filter.employee || (Number(filter.employee) < 0
+          ? device.holder_kind === 'associate' && Number(device.associate_id) === -Number(filter.employee)
+          : device.holder_kind === 'employee' && Number(device.hr_employee_id) === Number(filter.employee))) &&
         (filter.view !== 'shared' || device.holder_kind === 'shared') &&
         (filter.view !== 'attention' || attention(device)) &&
         (!filter.status || (filter.status === 'available' ? device.holder_kind === 'unassigned' :

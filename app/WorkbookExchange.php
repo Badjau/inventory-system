@@ -10,7 +10,7 @@ final class WorkbookExchange
 {
     private const FIELDS = ['id' => 'Inventory ID', 'import_key' => 'Source key', 'device_type' => 'Device type',
         'name' => 'Device name', 'serial_number' => 'Serial number', 'asset_tag' => 'Asset tag',
-        'device_condition' => 'Condition', 'holder_kind' => 'Holder kind', 'hr_employee_id' => 'HR employee ID',
+        'device_condition' => 'Condition', 'holder_kind' => 'Holder kind', 'hr_employee_id' => 'HR employee ID', 'associate_id' => 'Associate ID',
         'holder_name' => 'Recorded holder', 'department_id' => 'Department ID', 'department' => 'Department',
         'branch' => 'Holder branch', 'job_title' => 'Job title', 'location_branch_id' => 'Location branch ID',
         'location' => 'Location', 'handover_date' => 'Handover date'];
@@ -20,15 +20,16 @@ final class WorkbookExchange
         $headers = $rows[1] ?? [];
         if (count($headers) !== count(array_unique($headers))) throw new ValidationException('Duplicate export headers.');
         $columns = array_flip($headers);
-        foreach (self::FIELDS as $header) {
+        foreach (self::FIELDS as $field => $header) {
+            if ($field === 'associate_id') continue; // Older exports remain valid.
             if (!isset($columns[$header])) throw new ValidationException("Missing export column: $header.");
         }
         $records = [];
         foreach ($rows as $row => $cells) {
             if ($row === 1) continue;
             $record = [];
-            foreach (self::FIELDS as $field => $header) $record[$field] = $cells[$columns[$header]] ?? null;
-            foreach (['id', 'hr_employee_id', 'department_id', 'location_branch_id'] as $field) {
+            foreach (self::FIELDS as $field => $header) $record[$field] = isset($columns[$header]) ? ($cells[$columns[$header]] ?? null) : null;
+            foreach (['id', 'hr_employee_id', 'associate_id', 'department_id', 'location_branch_id'] as $field) {
                 if ($record[$field] !== null) $record[$field] = InventoryService::positiveInt($record[$field], $field);
             }
             $record['target_id'] = $record['id'] === null ? null : InventoryService::positiveInt($record['id'], 'inventory ID');

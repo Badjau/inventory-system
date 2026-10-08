@@ -313,6 +313,8 @@ try {
     exchangeTests($db, $service, $hr, $records, $mysql, $workbookPath);
     require __DIR__ . '/workbook-layouts.php';
     workbookLayoutTests($workbookPath, $records, $service, $hr);
+    require __DIR__ . '/associates.php';
+    associateTests($db, $service, $hr);
     check(Http::allowsLocal('127.0.0.1') && Http::allowsLocal('::1'), 'Localhost allowed');
     check(!Http::allowsLocal('192.168.100.72') && !Http::allowsLocal(''), 'LAN blocked by default');
     $authDirectory = __DIR__ . '/inventory_auth_' . bin2hex(random_bytes(8));
@@ -396,6 +398,7 @@ try {
     rejects(static fn () => InventoryService::positiveInt('1 OR 1=1', 'device ID'));
     rejects(static fn () => InventoryService::positiveInt(true, 'device ID'));
     rejects(static fn () => InventoryService::positiveInt(1.5, 'device ID'));
+    require __DIR__ . '/evidence.php';
     echo "PASS: $assertions assertions (" . ($mysql ? 'MySQL' : 'isolated SQLite fixture') . ").\n";
 } catch (Throwable $error) {
     fwrite(STDERR, 'FAIL: ' . $error->getMessage() . PHP_EOL . $error->getTraceAsString() . PHP_EOL);

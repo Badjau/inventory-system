@@ -1,5 +1,9 @@
 # Implementation map
 
+Associates belong to the fixed inventory-only branch `Other`, exposed by the associate directory and recorded in assignment snapshots. The branch filter includes Other without creating an HR branch or using a synthetic HR branch ID. Existing associate equipment resolves to Other for display/export.
+
+Inventory also owns `inv_associates` (ID, name, optional job title) for inventory-only contacts. `POST associate` creates these records; `GET state` exposes them separately as `associates`. Assignment accepts `holder_kind: associate` with a positive `associate_id`, clears the HR link, and records the holder snapshot atomically with device history. Returns/reassignment clear the associate link. People combines the directories for display; negative UI filter keys identify associates while stored associate and HR IDs remain separate positive integers. Added users are not attendance employees or login accounts. Excel exports include an optional Associate ID column; older exports remain readable and associate imports never infer HR links by name.
+
 ```mermaid
 flowchart LR
     Browser[HTML + vanilla JavaScript] --> API[PHP JSON endpoint]
@@ -45,7 +49,9 @@ The browser loads the full initial dataset because the workbook contains only 21
 
 ## Endpoint contract
 
-All routes use `public/api.php?action=...` and accept same-origin requests. Success is `{ "data": ... }`; failure is `{ "error": "message" }` with the appropriate HTTP status. Export returns XLSX on success. GET responses and the page are uncached. POST requires JSON and `X-CSRF-Token`, except import-preview which uses multipart form data with the same CSRF header. JSON requests are capped at 1 MiB to support larger specification edits.
+Device creation/editing accepts JSON as before or multipart data with a JSON `device` field and optional `photos[]`. Up to five JPEG/PNG/WebP images (2 MiB each, 40 megapixels) are validated by content. Files live outside the document root in `storage/evidence/`; metadata is attached to the create/edit event's existing snapshot JSON in the device transaction. Failed saves remove uploaded files. History exposes `photos` without exposing complete snapshots. Authenticated `GET evidence&event=ID&photo=INDEX` streams an event's photo through the existing access gate. No migration is needed. Back up the evidence directory together with inventory tables.
+
+All routes use `public/api.php?action=...` and accept same-origin requests. Success is `{ "data": ... }`; failure is `{ "error": "message" }` with the appropriate HTTP status. Export returns XLSX on success. GET responses and the page are uncached. POST requires JSON and `X-CSRF-Token`, except import-preview and device photo uploads which use multipart form data with the same CSRF header. JSON requests are capped at 1 MiB to support larger specification edits.
 
 | Action | Method | Input | Result |
 |---|---|---|---|

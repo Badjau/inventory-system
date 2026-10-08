@@ -11,6 +11,9 @@ try {
     }
     // Upgrade existing inventory tables without touching HR or replacing devices.
     $columns = $db->query('SHOW COLUMNS FROM inv_devices')->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('associate_id', $columns, true)) {
+        $db->exec('ALTER TABLE inv_devices ADD COLUMN associate_id BIGINT UNSIGNED NULL AFTER hr_employee_id');
+    }
     if (!in_array('location_branch_id', $columns, true)) {
         $db->exec('ALTER TABLE inv_devices ADD COLUMN location_branch_id BIGINT UNSIGNED NULL AFTER location');
     }

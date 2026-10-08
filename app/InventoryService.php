@@ -50,10 +50,14 @@ final class InventoryService
         if ($deviceId !== null) {
             $this->device($deviceId);
         }
-        $query = $this->db->prepare('SELECT id, device_id, event_type, message, handover_date, recorded_at
+        $query = $this->db->prepare('SELECT id, device_id, event_type, message, handover_date, recorded_at, snapshot_json
             FROM inv_events' . ($deviceId === null ? ' ORDER BY id DESC LIMIT 100' : ' WHERE device_id = ? ORDER BY id DESC'));
         $query->execute($deviceId === null ? [] : [$deviceId]);
-        return $query->fetchAll();
+        return array_map(static function (array $event): array {
+            $event['photos'] = json_decode($event['snapshot_json'], true, 512, JSON_THROW_ON_ERROR)['evidence_photos'] ?? [];
+            unset($event['snapshot_json']);
+            return $event;
+        }, $query->fetchAll());
     }
 
     public static function text(array $input, string $field, bool $required = false, int $max = 255): ?string
@@ -150,18 +154,18 @@ final class InventoryService
         return (int) $this->db->lastInsertId();
     }
 
-    private function event(int $id, string $type, string $message, ?string $date = null, ?array $before = null, ?array $incoming = null): void
+    private function event(int $id, string $type, string $message, ?string $date = null, ?array $before = null, ?array $incoming = null, array $photos = []): void
     {
         $query = $this->db->prepare('INSERT INTO inv_events
             (device_id, event_type, message, handover_date, snapshot_json) VALUES (?, ?, ?, ?, ?)');
         $query->execute([$id, $type, $message, $date,
-            json_encode(['before' => $before, 'after' => $this->device($id), ...($incoming === null ? [] : ['incoming_source' => $incoming])], JSON_THROW_ON_ERROR)]);
+            json_encode(['before' => $before, 'after' => $this->device($id), ...($incoming === null ? [] : ['incoming_source' => $incoming]), ...($photos ? ['evidence_photos' => $photos] : [])], JSON_THROW_ON_ERROR)]);
     }
 
-    public function save(array $input): array
+    public function save(array $input, array $photos = []): array
     {
         $values = $this->editable($input);
-        return $this->transaction(function () use ($input, $values): array {
+        return $this->transaction(function () use ($input, $values, $photos): array {
             if (array_key_exists('id', $input)) {
                 $id = self::positiveInt($input['id'], 'device ID');
                 $version = self::positiveInt($input['version'] ?? null, 'version');
@@ -183,10 +187,11 @@ final class InventoryService
                 }
                 $message = 'Device details updated.';
                 if ($changes) $message .= ' Specifications: ' . implode('; ', $changes) . '.';
-                $this->event($id, 'edit', $message, before: $before);
+                if ($photos) $message .= ' Evidence photos attached: ' . count($photos) . '.';
+                $this->event($id, 'edit', $message, before: $before, photos: $photos);
             } else {
                 $id = $this->insert($values);
-                $this->event($id, 'create', 'Device registered; available for assignment.');
+                $this->event($id, 'create', 'Device registered; available for assignment.' . ($photos ? ' Evidence photos attached: ' . count($photos) . '.' : ''), photos: $photos);
             }
             return $this->device($id);
         });
@@ -200,7 +205,7 @@ final class InventoryService
         $date = self::text($input, 'handover_date');
         if ($date !== null) self::validateDate($date);
         $notes = self::text($input, 'notes', max: 2000);
-        $values = ['holder_kind' => $kind, 'hr_employee_id' => null, 'holder_name' => null,
+        $values = ['holder_kind' => $kind, 'hr_employee_id' => null, 'associate_id' => null, 'holder_name' => null,
             'department' => null, 'department_id' => null, 'branch' => null, 'job_title' => null,
             'handover_date' => $kind === 'unassigned' ? null : $date];
         if ($kind === 'employee') {
@@ -209,6 +214,13 @@ final class InventoryService
                 'department' => $employee['department'], 'department_id' => $employee['department_id'],
                 'branch' => $employee['branch'], 'job_title' => $employee['job_title']]);
             $target = $employee['name'];
+        } elseif ($kind === 'associate') {
+            $associate = (new Associates($this->db))->find(self::positiveInt($input['associate_id'] ?? null, 'associate ID'));
+            $values['associate_id'] = (int) $associate['id'];
+            $values['holder_name'] = $associate['name'];
+            $values['job_title'] = $associate['job_title'];
+            $values['branch'] = $associate['branch'];
+            $target = $associate['name'];
         } elseif ($kind === 'shared') {
             $department = isset($input['department_id'])
                 ? $hr->department(self::positiveInt($input['department_id'], 'department ID'))
@@ -294,8 +306,8 @@ final class InventoryService
                 $input['specifications'] = array_filter($record['specifications'], static fn ($v): bool => $v !== '');
                 $values = $this->editable($input);
                 $kind = $record['holder_kind'];
-                if (!in_array($kind, ['employee', 'imported', 'shared', 'unassigned'], true)) throw new ValidationException('Invalid holder kind in workbook.');
-                $holder = ['holder_kind' => $kind, 'hr_employee_id' => null, 'holder_name' => null,
+                if (!in_array($kind, ['employee', 'associate', 'imported', 'shared', 'unassigned'], true)) throw new ValidationException('Invalid holder kind in workbook.');
+                $holder = ['holder_kind' => $kind, 'hr_employee_id' => null, 'associate_id' => null, 'holder_name' => null,
                     'department' => null, 'department_id' => null, 'branch' => null, 'job_title' => null];
                 $employeeId = $record['approved_employee_id'];
                 if ($employeeId !== null) {
@@ -304,6 +316,12 @@ final class InventoryService
                     $holder = ['holder_kind' => 'employee', 'hr_employee_id' => $employeeId, 'holder_name' => $employee['name'],
                         'department' => $employee['department'], 'department_id' => $employee['department_id'],
                         'branch' => $employee['branch'], 'job_title' => $employee['job_title']];
+                } elseif ($kind === 'associate') {
+                    $associate = (new Associates($this->db))->find(self::positiveInt($record['associate_id'] ?? null, 'associate ID'));
+                    $holder['associate_id'] = (int) $associate['id'];
+                    $holder['holder_name'] = $associate['name'];
+                    $holder['job_title'] = $associate['job_title'];
+                    $holder['branch'] = $associate['branch'];
                 } elseif ($kind === 'shared') {
                     $department = $exchange && $record['department_id'] !== null
                         ? $hr->department(self::positiveInt($record['department_id'], 'department ID'))

@@ -22,6 +22,9 @@ assert.equal(importGroups(reviewGroups, reviewChoices)[0].records.length, 2);
 assert.equal(importGroups(reviewGroups, { ...reviewChoices, 2: { ...reviewChoices[2], employeeId: null } }).length, 2);
 assert.equal(importGroups([{ ...reviewGroups[0], conflict: true }], { 1: { ...reviewChoices[1], resolved: false } })[0].conflict, true);
 assert.equal(importGroups(reviewGroups, { ...reviewChoices, 2: { ...reviewChoices[2], selected: false } })[0].selected, false);
+const associateDevice = { id: 99, holder_kind: 'associate', associate_id: 10, hr_employee_id: null };
+assert.equal(filterDevices([current, associateDevice], { employee: -10 })[0].id, 99);
+assert.equal(filterDevices([current, associateDevice], { employee: 10 }).length, 1);
 
 async function startupSmoke(role = 'editor') {
   const { readFileSync } = require('node:fs');
@@ -55,7 +58,7 @@ async function startupSmoke(role = 'editor') {
     { id: 3, name: 'Faulty monitor', device_type: 'Monitor', holder_kind: 'unassigned', device_condition: 'Faulty', specifications: {} }
   ];
   const fetch = async url => ({ ok: true, json: async () => ({ data: url.includes('action=history') ? [] :
-    { devices, employees: [], departments: [], branches: [], activity: [] } }) });
+    { devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [] } }) });
   new Function('document', 'InventoryModel', 'fetch', app)(document, require('../public/assets/model.js'), fetch);
   for (let i = 0; i < 10; i++) await Promise.resolve();
   assert.equal(elements.get('add-device').disabled, role === 'viewer');
@@ -67,6 +70,13 @@ async function startupSmoke(role = 'editor') {
   listeners['document:click']({ target: { closest: () => ({ dataset: { stat: 'attention' } }) } });
   assert.equal(elements.get('table-body').innerHTML.includes('Faulty monitor'), true);
   assert.equal(elements.get('table-body').innerHTML.includes('Unassigned mouse'), false);
+  listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'people' } }) } });
+  assert.equal(elements.get('add-device').textContent, '＋ Add User');
+  assert.equal(elements.get('table-body').innerHTML.includes('&lt;Associate&gt;'), true);
+  assert.equal(elements.get('table-body').innerHTML.includes('data-person="-10"'), true);
+  listeners['document:click']({ target: { closest: () => ({ dataset: { person: '-10' } }) } });
+  assert.equal(elements.get('add-device').textContent, '＋ Add device');
+  assert.equal(elements.get('table-body').innerHTML.includes('Recorded holder laptop'), false);
   console.log('PASS: app startup, removed Holder Review, and summary card views.');
   const importApp = readFileSync(__dirname + '/../public/assets/import.js', 'utf8');
   const requests = [];
