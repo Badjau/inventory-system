@@ -36,7 +36,7 @@
 .drawer-columns>.detail-section:first-child .detail-meta strong{text-align:left}
 .drawer-columns>.detail-section:first-child .assignment-hint{grid-column:1/-1;grid-row:4}
 .drawer-content .specs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:28px 24px}
-.drawer-content .specs>div{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.drawer-content .specs>div{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
 .drawer-content .specs strong{text-align:left;white-space:pre-wrap;font-weight:500}
 .drawer-section-heading{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:18px}
 .drawer-section-heading h3{margin:0}

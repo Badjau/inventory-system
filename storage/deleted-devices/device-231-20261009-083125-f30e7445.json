@@ -1,0 +1,52 @@
+{
+    "archived_at": "2026-10-09T08:31:25+00:00",
+    "reason": "User requested deletion of duplicate serial record with a location; kept device 224.",
+    "actor": {
+        "name": "System \/ CLI"
+    },
+    "device": {
+        "id": 231,
+        "import_key": null,
+        "device_type": "Laptop",
+        "name": "ACER ASPIRE GO 14",
+        "serial_number": "NXJF4SP00152401A2B9601",
+        "asset_tag": null,
+        "device_condition": "Good",
+        "location": "Apo",
+        "location_branch_id": 1,
+        "holder_kind": "employee",
+        "hr_employee_id": 66,
+        "associate_id": null,
+        "holder_name": "Franz Elijah Vasquez",
+        "department": "IT",
+        "department_id": 1,
+        "branch": "Apo",
+        "job_title": "Jr. Programmer",
+        "handover_date": "2026-06-29",
+        "specifications_json": "{\"CPU\":\"INTEL ULTRA 5 115U\",\"RAM\":\"16GB\",\"Storage\":\"500GB\",\"OS\":\"WINDOWS 11\",\"LICENSE\":\"PREMIUM\",\"MICROSOFT 365\":\"PREMIUM\",\"ANTI VIRUS\":\"MCASIA\",\"SAP\":\"NO\",\"ADOBE\":\"PDF READER\",\"VIBER\":\"YES\"}",
+        "source_json": null,
+        "version": 2,
+        "created_at": "2026-10-08 13:17:10",
+        "updated_at": "2026-10-08 13:18:03"
+    },
+    "events": [
+        {
+            "id": 1302,
+            "device_id": 231,
+            "event_type": "create",
+            "message": "Device registered; available for assignment.",
+            "handover_date": null,
+            "snapshot_json": "{\"before\":null,\"after\":{\"id\":231,\"import_key\":null,\"device_type\":\"Laptop\",\"name\":\"ACER ASPIRE GO 14\",\"serial_number\":\"NXJF4SP00152401A2B9601\",\"asset_tag\":null,\"device_condition\":\"Good\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-08 13:17:10\",\"updated_at\":\"2026-10-08 13:17:10\",\"specifications\":{\"CPU\":\"INTEL ULTRA 5 115U\",\"RAM\":\"16GB\",\"Storage\":\"500GB\",\"OS\":\"WINDOWS 11\",\"LICENSE\":\"PREMIUM\",\"MICROSOFT 365\":\"PREMIUM\",\"ANTI VIRUS\":\"MCASIA\",\"SAP\":\"NO\",\"ADOBE\":\"PDF READER\",\"VIBER\":\"YES\"},\"source\":null}}",
+            "recorded_at": "2026-10-08 13:17:10"
+        },
+        {
+            "id": 1303,
+            "device_id": 231,
+            "event_type": "assign",
+            "message": "Holder changed from unassigned pool to Franz Elijah Vasquez.",
+            "handover_date": "2026-06-29",
+            "snapshot_json": "{\"before\":{\"id\":231,\"import_key\":null,\"device_type\":\"Laptop\",\"name\":\"ACER ASPIRE GO 14\",\"serial_number\":\"NXJF4SP00152401A2B9601\",\"asset_tag\":null,\"device_condition\":\"Good\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-08 13:17:10\",\"updated_at\":\"2026-10-08 13:17:10\",\"specifications\":{\"CPU\":\"INTEL ULTRA 5 115U\",\"RAM\":\"16GB\",\"Storage\":\"500GB\",\"OS\":\"WINDOWS 11\",\"LICENSE\":\"PREMIUM\",\"MICROSOFT 365\":\"PREMIUM\",\"ANTI VIRUS\":\"MCASIA\",\"SAP\":\"NO\",\"ADOBE\":\"PDF READER\",\"VIBER\":\"YES\"},\"source\":null},\"after\":{\"id\":231,\"import_key\":null,\"device_type\":\"Laptop\",\"name\":\"ACER ASPIRE GO 14\",\"serial_number\":\"NXJF4SP00152401A2B9601\",\"asset_tag\":null,\"device_condition\":\"Good\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"employee\",\"hr_employee_id\":66,\"holder_name\":\"Franz Elijah Vasquez\",\"department\":\"IT\",\"department_id\":1,\"branch\":\"Apo\",\"job_title\":\"Jr. Programmer\",\"handover_date\":\"2026-06-29\",\"version\":2,\"created_at\":\"2026-10-08 13:17:10\",\"updated_at\":\"2026-10-08 13:18:03\",\"specifications\":{\"CPU\":\"INTEL ULTRA 5 115U\",\"RAM\":\"16GB\",\"Storage\":\"500GB\",\"OS\":\"WINDOWS 11\",\"LICENSE\":\"PREMIUM\",\"MICROSOFT 365\":\"PREMIUM\",\"ANTI VIRUS\":\"MCASIA\",\"SAP\":\"NO\",\"ADOBE\":\"PDF READER\",\"VIBER\":\"YES\"},\"source\":null}}",
+            "recorded_at": "2026-10-08 13:18:03"
+        }
+    ]
+}

@@ -57,7 +57,7 @@ if (!$user) {
       <div id="notice" role="status" hidden></div>
       <div id="error" role="alert" hidden></div>
       <div id="stats" class="stats"></div>
-      <section id="preset-panel" class="inventory-panel" aria-label="Desktop preset" hidden></section>
+      <section id="preset-panel" class="inventory-panel" aria-label="Device presets" hidden></section>
       <div id="inventory-layout" class="inventory-layout">
         <section class="inventory-panel" aria-label="Directory">
           <div class="toolbar">
@@ -68,7 +68,7 @@ if (!$user) {
             <select id="branch-filter" class="button" aria-label="Branch"><option value="">All branches</option></select>
             <select id="status-filter" class="button" aria-label="Assignment status"><option value="">All statuses</option><option value="assigned">Assigned</option><option value="available">Available</option></select>
           </div>
-          <div class="table-scroll"><table id="directory-table"><thead id="table-head"></thead><tbody id="table-body"><tr><td class="empty-state">Loading inventory…</td></tr></tbody></table></div>
+          <div id="table-scroll" class="table-scroll"><table id="directory-table"><thead id="table-head"></thead><tbody id="table-body"><tr><td class="empty-state">Loading inventory…</td></tr></tbody></table><button type="button" id="activity-more" class="button" hidden>Load more changes</button></div>
           <div class="table-footer"><span id="table-footer"></span><button id="clear-person" class="text-button" hidden>Clear employee filter</button></div>
         </section>
         <aside id="detail" class="detail-panel" aria-label="Device details" hidden></aside>

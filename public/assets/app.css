@@ -11,13 +11,14 @@ body[data-role="viewer"] #import-excel { display: none; }
 .evidence-photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; }
 #preset-panel { padding: 24px; flex: 1; min-height: 0; overflow: auto; }
 #preset-panel label { display: block; min-width: 0; }
-#preset-panel input, #preset-panel textarea { display: block; width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: white; }
+#preset-panel input, #preset-panel textarea, #preset-panel select { display: block; width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: white; }
 #preset-panel textarea { resize: vertical; }
 #preset-panel p { margin-bottom: 18px; }
-.preset-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.preset-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 .preset-order { display: flex; gap: 4px; }
 [data-drag-spec] { cursor: grab; }
 @media (max-width: 700px) {
   .preset-row { grid-template-columns: 1fr; }
   #preset-panel { padding: 16px; }
 }
+.activity-scroll { overflow-anchor: none; }

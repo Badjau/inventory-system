@@ -23,3 +23,11 @@ $legacyEvent = $db->prepare('INSERT INTO inv_events (device_id, event_type, mess
 $legacyEvent->execute([$auditDevice['id'], 'note', 'Historical note', '{}']);
 check($auditService->history($auditDevice['id'])[0]['actor'] === null, 'Legacy events have no invented actor');
 check($auditService->history()[0]['actor'] === null, 'Activity exposes the same audit identity as device history');
+$allActivity = $auditService->history();
+$eventCount = (int) $db->query('SELECT COUNT(*) FROM inv_events')->fetchColumn();
+check($eventCount > 100 && count($allActivity) === $eventCount, 'Activity returns all changes beyond the former 100-event limit');
+check((int) $allActivity[array_key_last($allActivity)]['id'] === (int) $db->query('SELECT MIN(id) FROM inv_events')->fetchColumn(), 'Activity includes the oldest recorded change');
+$activityIds = array_map('intval', array_column($allActivity, 'id'));
+$descendingIds = $activityIds;
+rsort($descendingIds, SORT_NUMERIC);
+check($activityIds === $descendingIds, 'Activity orders all changes newest first');

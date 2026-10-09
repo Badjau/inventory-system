@@ -8,6 +8,7 @@ try {
     $defaults = $preset->read();
     check($defaults['version'] === 0 && count($defaults['fields']) === 30, 'Desktop preset starts with the requested fields');
     check(!is_file($presetDirectory . '/desktop.json'), 'Reading default preset does not write data');
+    check(!array_key_exists('Other', $defaults['presets']), 'Other is excluded from creation presets');
     $fields = [['name' => 'Custom spec', 'value' => "Line one\nLine two"], ...array_reverse($defaults['fields'])];
     $saved = $preset->save(['version' => 0, 'fields' => $fields]);
     check($saved['version'] === 1 && $preset->read()['fields'] === $fields, 'Custom values and field order persist');
@@ -39,6 +40,30 @@ try {
     $legacy = $presetDirectory . '/legacy.json';
     file_put_contents($legacy, json_encode(['version' => 4, 'fields' => $fields]));
     check((new Inventory\DevicePreset($legacy))->read()['device_types'] === Inventory\InventoryService::TYPES, 'Old preset files keep Desktop fields and acquire built-in types');
+    $routerFields = [['name' => 'Managed', 'value' => 'yes'], ['name' => 'Wireless', 'value' => 'no'], ['name' => 'Ports', 'value' => '8']];
+    $routerPreset = $preset->save(['version' => 4, 'device_type' => 'Router', 'fields' => $routerFields]);
+    check($routerPreset['presets']['Router'] === $routerFields && $preset->read()['presets']['Router'] === $routerFields, 'Each type persists its own ordered defaults');
+    check($routerPreset['fields'] === $fields, 'Saving another type preserves Desktop defaults');
+    rejects(static fn () => $preset->save(['version' => 5, 'device_type' => 'Missing', 'fields' => []]));
+    rejects(static fn () => $preset->save(['version' => 4, 'device_type' => 'Router', 'fields' => []]), 409);
+    check($preset->read() === $routerPreset, 'Invalid and stale type saves preserve all presets');
+    $withScanner = $preset->save(['version' => 5, 'name' => 'Scanner']);
+    check($withScanner['presets']['Scanner'] === [] && $withScanner['presets']['Router'] === $routerFields, 'New types have empty templates and preserve other presets');
+    rejects(static fn () => $preset->save(['version' => 6, 'device_type' => 'Other', 'fields' => []]));
+    $presetService = new Inventory\InventoryService($db, null, $withScanner['device_types'], $withScanner['presets']);
+    $creation = ['device_type' => 'Router', 'name' => 'Preset router', 'device_condition' => 'Good'];
+    $created = $presetService->save($creation);
+    check($created['specifications'] === ['Managed' => 'yes', 'Wireless' => 'no', 'Ports' => '8'], 'New devices inherit the selected type preset when specifications are omitted');
+    $snapshotQuery = $db->prepare('SELECT snapshot_json FROM inv_events WHERE device_id = ?');
+    $snapshotQuery->execute([$created['id']]);
+    $snapshot = json_decode($snapshotQuery->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+    check($snapshot['after']['specifications'] === $created['specifications'], 'Creation history records inherited defaults atomically');
+    $overridden = $presetService->save([...$creation, 'specifications' => ['Ports' => '16', 'Managed' => '']]);
+    check($overridden['specifications'] === ['Ports' => '16'], 'User overrides and cleared preset fields are respected without reintroducing defaults');
+    check($presetService->save([...$creation, 'specifications' => []])['specifications'] === [], 'Explicitly removed creation specifications stay empty');
+    $edited = $presetService->save([...$creation, 'id' => $created['id'], 'version' => $created['version'], 'specifications' => ['Ports' => '24']]);
+    check($edited['specifications'] === ['Ports' => '24'], 'Editing existing devices does not reapply creation presets');
+    check($presetService->save([...$creation, 'device_type' => 'Scanner'])['specifications'] === [], 'An empty type preset creates a device without specifications');
 } finally {
     foreach (glob($presetDirectory . '/*') as $file) unlink($file);
     rmdir($presetDirectory);

@@ -66,9 +66,18 @@ async function startupSmoke(role = 'editor') {
       elements.set(match[1], { textContent: '', value: '', hidden: false, disabled: false, files: [],
         showModal() { this.open = true; }, close() { this.open = false; },
         classList: { toggle() {} }, querySelectorAll(selector) {
-          if (selector === '[data-spec-row]') return [...this.innerHTML.matchAll(/<input maxlength="100" value="([^"]*)" required><\/label><label>Value<textarea rows="2" maxlength="4000">([\s\S]*?)<\/textarea>/g)].map(match => ({
-            querySelector(selector) { return { value: match[selector === 'input' ? 1 : 2] }; }
-          }));
+          if (selector === '[data-spec-row]') return [...this.innerHTML.matchAll(/<div class="spec-edit-row[^>]*data-spec-row([^>]*)>([\s\S]*?)<\/div>/g)].map(match => {
+            const name = match[2].match(/<input maxlength="100" value="([^"]*)" required>/)?.[1] || '';
+            const text = match[2].match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/)?.[1];
+            const choice = match[2].includes('data-spec-value') ? match[2].match(/<option value="([^"]*)" selected>/)?.[1] || '' : null;
+            return { dataset: { specDefault: match[1].match(/data-spec-default="([^"]*)"/)?.[1] || '' },
+              querySelector(selector) {
+                if (selector === 'input') return { value: name };
+                if (selector === '[data-spec-value]') return choice === null ? null : { value: choice };
+                return text === undefined ? null : { value: text };
+              }
+            };
+          });
           if (selector !== '[data-thumbnail]') return [];
           return [...this.innerHTML.matchAll(/data-thumbnail="([^"]+)"/g)].map(match => {
             const image = { dataset: { thumbnail: match[1] }, classList: { add() {} }, addEventListener() {}, remove() {} };
@@ -96,13 +105,17 @@ async function startupSmoke(role = 'editor') {
     { id: 3, name: 'Faulty monitor', device_type: 'Monitor', holder_kind: 'unassigned', device_condition: 'Faulty', specifications: {} }
   ];
   const fetch = async url => ({ ok: true, json: async () => ({ data: url.includes('action=history') ? (url.endsWith('id=2') ? [
-    { id: 9, message: 'Uploaded photos', photos: [{ name: 'Removed.jpg' }, { name: 'Kept.jpg' }], removed_photo_indexes: [0] }
+    { id: 11, message: 'Old change', actor: null },
+    { id: 10, message: 'Automated change', actor: { name: 'System / CLI', username: null } },
+    { id: 12, message: 'Username-only change', actor: { name: '', username: '<username>' } },
+    { id: 9, message: 'Uploaded photos', actor: { name: '<Admin>', username: 'audit-user' }, photos: [{ name: 'Removed.jpg' }, { name: 'Kept.jpg' }], removed_photo_indexes: [0] }
   ] : []) :
-    { desktop_preset: { version: 0, device_types: ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other', 'Router'], fields: [{ name: 'MAC ADDRESS', value: '' }, { name: 'Custom <spec>', value: '<default>' }] }, devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [
+    { desktop_preset: { version: 0, device_types: ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other', 'Router'], presets: { Router: [{ name: 'Managed', value: 'yes' }, { name: 'Wireless', value: 'no' }, { name: 'Ports', value: '8' }] }, fields: [{ name: 'MAC ADDRESS', value: '' }, { name: 'Custom <spec>', value: '<default>' }] }, devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [
       { device_id: 1, message: 'Device edited', actor: { id: 1, name: '<Admin>', username: 'audit-user' } },
-      { device_id: 2, message: 'Legacy edit', actor: null }
+      { device_id: 2, message: 'Legacy edit', actor: null },
+      ...Array.from({ length: 105 }, (_, index) => ({ device_id: 2, message: 'Older change ' + index, actor: null }))
     ] } }) });
-  new Function('document', 'InventoryModel', 'fetch', 'IntersectionObserver', 'InventoryPhotos', app)(document, require('../public/assets/model.js'), fetch, TestObserver, { attach: () => () => [] });
+  new Function('document', 'InventoryModel', 'fetch', 'IntersectionObserver', 'InventoryPhotos', 'requestAnimationFrame', app)(document, require('../public/assets/model.js'), fetch, TestObserver, { attach: () => () => [] }, callback => callback());
   for (let i = 0; i < 10; i++) await Promise.resolve();
   assert.equal(elements.get('add-device').disabled, role === 'viewer');
   assert.equal(elements.get('stats').innerHTML.match(/data-stat=/g).length, 4);
@@ -130,6 +143,10 @@ async function startupSmoke(role = 'editor') {
   assert.equal(elements.get('device-photos').innerHTML.includes('Kept.jpg'), true);
   assert.equal(elements.get('device-photos').innerHTML.includes('data-remove-photo="1"'), role !== 'viewer');
   assert.equal(elements.get('device-photos').innerHTML.includes('data-remove-photo="0"'), false);
+  assert.equal(elements.get('history').innerHTML.includes('Recorded by &lt;Admin&gt; (audit-user)'), true);
+  assert.equal(elements.get('history').innerHTML.includes('Recorded by System / CLI'), true);
+  assert.equal(elements.get('history').innerHTML.includes('Recorded by Not recorded'), true);
+  assert.equal(elements.get('history').innerHTML.includes('Recorded by &lt;username&gt;'), true);
   assert.equal(elements.get('history').innerHTML.includes('Removed.jpg'), true);
   assert.equal(elements.get('history').innerHTML.includes('retained in history'), true);
   let escaped = false;
@@ -154,17 +171,27 @@ async function startupSmoke(role = 'editor') {
   assert.equal(elements.get('inventory-layout').hidden, true);
   assert.equal(elements.get('preset-panel').hidden, false);
   assert.equal(elements.get('stats').hidden, true);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('MAC ADDRESS'), false);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('Select device type'), true);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('<option value="Other"'), false);
+  elements.get('preset-type').value = 'Desktop';
+  listeners['preset-type:change']();
   assert.equal(elements.get('preset-panel').innerHTML.includes('MAC ADDRESS'), true);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('<label>Value'), false);
+  assert.equal(elements.get('preset-panel').innerHTML.includes('<textarea'), false);
   assert.equal(elements.get('preset-panel').innerHTML.includes('Custom &lt;spec&gt;'), true);
   assert.equal(elements.get('preset-panel').innerHTML.includes('&lt;default&gt;'), true);
-  assert.equal(elements.get('add-device').textContent, '＋ Create Desktop');
-  assert.equal(elements.get('preset-panel').innerHTML.includes('Create Device Type'), true);
+  assert.equal(elements.get('add-device').textContent, '＋ Create Device Type');
+  assert.equal(elements.get('preset-panel').innerHTML.includes('Create Device Type'), false);
   assert.equal(elements.get('type-filter').innerHTML.includes('Router'), true);
   if (role !== 'viewer') {
-    listeners['create-device-type:click']();
+    listeners['document:click']({ target: { closest: () => ({ id: 'add-device', dataset: {} }) } });
     assert.equal(elements.get('dialog-title').textContent, 'Create Device Type');
     assert.equal(elements.get('dialog-fields').innerHTML.includes('name="name" maxlength="30" required'), true);
+    listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'devices' } }) } });
     listeners['document:click']({ target: { closest: () => ({ id: 'add-device', dataset: {} }) } });
+    deviceTypeSelector.value = 'Desktop';
+    listeners['device-type:change']();
     assert.equal(elements.get('spec-editor').querySelectorAll('[data-spec-row]').length, 2);
     assert.equal(elements.get('spec-editor').innerHTML.includes('&lt;default&gt;'), true);
     assert.equal(elements.get('dialog-fields').innerHTML.includes('Router'), true);
@@ -173,7 +200,14 @@ async function startupSmoke(role = 'editor') {
     assert.equal(elements.get('spec-editor').innerHTML, '');
     deviceTypeSelector.value = 'Router';
     listeners['device-type:change']();
-    assert.equal(elements.get('spec-editor').innerHTML, '');
+    assert.equal(elements.get('spec-editor').querySelectorAll('[data-spec-row]').length, 3);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('Managed'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('value="Yes" selected'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('value="No" selected'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('value="Other" selected'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('>yes</textarea>'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('>no</textarea>'), true);
+    assert.equal(elements.get('spec-editor').innerHTML.includes('>8</textarea>'), true);
     deviceTypeSelector.value = 'Desktop';
     listeners['device-type:change']();
     assert.equal(elements.get('spec-editor').querySelectorAll('[data-spec-row]').length, 2);
@@ -184,17 +218,33 @@ async function startupSmoke(role = 'editor') {
     assert.equal(elements.get('spec-editor').innerHTML.includes('Original laptop spec'), true);
     assert.equal(elements.get('spec-editor').innerHTML.includes('Keep this value'), true);
     assert.equal(elements.get('spec-editor').innerHTML.includes('MAC ADDRESS'), false);
-    console.log('PASS: custom type choices, Desktop defaults, empty other types, and existing specifications.');
+    console.log('PASS: custom type choices, Desktop and custom type defaults, empty types, and existing specifications.');
   }
   listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'activity' } }) } });
   assert.equal(elements.get('inventory-layout').hidden, false);
   assert.equal(elements.get('table-head').innerHTML.includes('Changed by'), true);
+  assert.equal(elements.get('table-body').innerHTML.includes('Older change 104'), false);
+  assert.equal(elements.get('table-footer').textContent, 'Showing 50 of 107 changes');
+  const activityScrollObserver = observers[observers.length - 1];
+  activityScrollObserver.callback([{ isIntersecting: false }]);
+  assert.equal(elements.get('table-footer').textContent, 'Showing 50 of 107 changes');
+  activityScrollObserver.callback([{ isIntersecting: true }]);
+  assert.equal(elements.get('table-footer').textContent, 'Showing 100 of 107 changes');
+  activityScrollObserver.callback([{ isIntersecting: true }]);
+  assert.equal(elements.get('table-footer').textContent, 'Showing 107 of 107 changes');
+  assert.equal(elements.get('table-body').innerHTML.includes('Older change 104'), true);
+  assert.equal(elements.get('activity-more').hidden, true);
   assert.equal(elements.get('table-body').innerHTML.includes('&lt;Admin&gt;'), true);
   assert.equal(elements.get('table-body').innerHTML.includes('Not recorded'), true);
   elements.get('search').value = 'AUDIT-USER';
   listeners['search:input']();
   assert.equal(elements.get('table-body').innerHTML.includes('Device edited'), true);
   assert.equal(elements.get('table-body').innerHTML.includes('Legacy edit'), false);
+  assert.equal(elements.get('table-footer').textContent, 'Showing 1 of 1 changes');
+  elements.get('search').value = 'Older change 104';
+  listeners['search:input']();
+  assert.equal(elements.get('table-body').innerHTML.includes('Older change 104'), true);
+  assert.equal(elements.get('table-footer').textContent, 'Showing 1 of 1 changes');
   const importApp = readFileSync(__dirname + '/../public/assets/import.js', 'utf8');
   const requests = [];
   const source = { sheet: 'PC', row: 2 };

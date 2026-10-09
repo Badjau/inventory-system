@@ -14,7 +14,7 @@ final class InventoryService
 
     private array $actor;
 
-    public function __construct(private PDO $db, ?array $actor = null, private ?array $deviceTypes = null)
+    public function __construct(private PDO $db, ?array $actor = null, private ?array $deviceTypes = null, private array $devicePresets = [])
     {
         // Copy only audit identity, never credentials or client-supplied fields.
         $this->actor = $actor === null
@@ -112,7 +112,7 @@ final class InventoryService
             $this->device($deviceId);
         }
         $query = $this->db->prepare('SELECT id, device_id, event_type, message, handover_date, recorded_at, snapshot_json
-            FROM inv_events' . ($deviceId === null ? ' ORDER BY id DESC LIMIT 100' : ' WHERE device_id = ? ORDER BY id DESC'));
+            FROM inv_events' . ($deviceId === null ? ' ORDER BY id DESC' : ' WHERE device_id = ? ORDER BY id DESC'));
         $query->execute($deviceId === null ? [] : [$deviceId]);
         $events = array_map(static function (array $event): array {
             $snapshot = json_decode($event['snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
@@ -235,6 +235,15 @@ final class InventoryService
 
     public function save(array $input, array $photos = []): array
     {
+        // Only an omitted creation specification map uses defaults. Explicit edits,
+        // cleared values, and empty maps retain the caller's intended specifications.
+        if (!array_key_exists('id', $input) && !array_key_exists('specifications', $input)) {
+            $type = self::text($input, 'device_type', true);
+            $input['specifications'] = [];
+            foreach ($this->devicePresets[$type] ?? [] as $field) {
+                $input['specifications'][$field['name']] = $field['value'];
+            }
+        }
         $values = $this->editable($input);
         return $this->transaction(function () use ($input, $values, $photos): array {
             if (array_key_exists('id', $input)) {

@@ -12,9 +12,15 @@ final class DevicePreset
 
     public function read(): array
     {
-        if (!is_file($this->path)) return ['version' => 0, 'fields' => array_map(static fn ($name) => ['name' => $name, 'value' => ''], self::DESKTOP), 'device_types' => InventoryService::TYPES];
-        $data = json_decode(file_get_contents($this->path), true, 32, JSON_THROW_ON_ERROR);
-        return ['version' => $data['version'], 'fields' => self::validate($data['fields']), 'device_types' => $data['device_types'] ?? InventoryService::TYPES];
+        $data = is_file($this->path) ? json_decode(file_get_contents($this->path), true, 32, JSON_THROW_ON_ERROR) :
+            ['version' => 0, 'fields' => array_map(static fn ($name) => ['name' => $name, 'value' => ''], self::DESKTOP)];
+        $types = $data['device_types'] ?? InventoryService::TYPES;
+        $presets = [];
+        foreach ($types as $type) {
+            if ($type === 'Other') continue;
+            $presets[$type] = self::validate($data['presets'][$type] ?? ($type === 'Desktop' ? $data['fields'] : []));
+        }
+        return ['version' => $data['version'], 'fields' => $presets['Desktop'], 'device_types' => $types, 'presets' => $presets];
     }
 
     public static function validate(mixed $fields): array
@@ -59,7 +65,14 @@ final class DevicePreset
                 if (count($types) >= 128) throw new ValidationException('Use up to 128 device types.');
                 $types[] = $name;
             }
-            $data = ['version' => $current['version'] + 1, 'fields' => $fields ?? $current['fields'], 'device_types' => $types];
+            $presets = $current['presets'];
+            if ($creatingType) $presets[$name] = [];
+            else {
+                $type = $input['device_type'] ?? 'Desktop';
+                if (!is_string($type) || !array_key_exists($type, $presets)) throw new ValidationException('Choose an existing device preset.');
+                $presets[$type] = $fields;
+            }
+            $data = ['version' => $current['version'] + 1, 'fields' => $presets['Desktop'], 'device_types' => $types, 'presets' => $presets];
             $temp = tempnam(dirname($this->path), 'preset-');
             if ($temp === false || file_put_contents($temp, json_encode($data, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT)) === false || !rename($temp, $this->path)) throw new \RuntimeException('Cannot save preset.');
             return $data;

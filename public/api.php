@@ -38,7 +38,8 @@ try {
     $db = Database::connect(inventory_config()['database']);
     $preset = new Inventory\DevicePreset(dirname(__DIR__) . '/storage/desktop-preset.json');
     if ($action === 'preset') Http::json(['data' => $preset->save($input)]);
-    $service = new InventoryService($db, $user, $preset->read()['device_types']);
+    $creationPresets = $preset->read();
+    $service = new InventoryService($db, $user, $creationPresets['device_types'], $creationPresets['presets']);
     $hr = new HrDirectory($db);
     if ($action === 'evidence') {
         $eventId = InventoryService::positiveInt($_GET['event'] ?? null, 'event ID');
