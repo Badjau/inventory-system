@@ -5,9 +5,11 @@
   const { escape: esc, attention, displayDevice, filterDevices } = InventoryModel;
   let types = ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other'];
   const conditions = ['Good', 'Needs attention', 'Faulty', 'Unknown'];
-  const titles = { devices: 'Devices', people: 'People', shared: 'Shared devices', attention: 'Needs attention', activity: 'Activity', preset: 'Preset' };
+  const titles = { devices: 'Devices', people: 'People', shared: 'Shared devices', attention: 'Needs attention', activity: 'Activity' };
   let state = { devices: [], employees: [], branches: [], departments: [], activity: [] };
   let view = 'devices', selected = null, employeeFilter = null, submitHandler = null, loading = false;
+  const createTypeAction = '__inventory_create_device_type_action__';
+  let selectCreatedType = false;
   let presetType = '';
   const presetDrafts = new Map();
   let historyRequest = 0;
@@ -53,6 +55,7 @@
   const people = () => [...state.employees, ...(state.associates || []).map(person => ({ ...person,
     id: -Number(person.id), employee_id: 'Associate', hr_role: 'Inventory only', department: '', branch: 'Other' }))];
   const chosen = () => devices().find(device => device.id === selected);
+  const otherLast = values => [...values.filter(value => value !== 'Other'), ...values.filter(value => value === 'Other')];
   const options = (values, selectedValue = '') => values.map(value => `<option value="${esc(value)}"${value === selectedValue ? ' selected' : ''}>${esc(value)}</option>`).join('');
   const field = (label, name, value = '', extra = '') => `<label>${esc(label)}<input name="${esc(name)}" value="${esc(value)}" maxlength="255" ${extra}></label>`;
 
@@ -82,7 +85,7 @@
     showError('');
     try {
       state = await request('state');
-      types = state.desktop_preset?.device_types || types;
+      types = otherLast(state.desktop_preset?.device_types || types);
       const currentType = $('#type-filter').value;
       $('#type-filter').innerHTML = '<option value="">All types</option>' + options(types);
       $('#type-filter').value = types.includes(currentType) ? currentType : '';
@@ -131,15 +134,7 @@
     const rows = devices();
     renderStats(rows);
     $('#page-title').textContent = titles[view];
-    $('#add-device').textContent = view === 'people' ? '＋ Add User' : view === 'preset' ? '＋ Create Device Type' : '＋ Add device';
-    $('#preset-panel').hidden = view !== 'preset';
-    $('#inventory-layout').hidden = view === 'preset';
-    $('#stats').hidden = view === 'preset';
-    if (view === 'preset') {
-      $('#page-description').textContent = 'Manage device types and Desktop specification defaults.';
-      renderPreset();
-      return;
-    }
+    $('#add-device').textContent = view === 'people' ? '＋ Add User' : '＋ Add device';
     const filteredEmployee = people().find(employee => Number(employee.id) === Number(employeeFilter));
     $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users do not get reflected onto HR dashboard.' :
       view === 'activity' ? 'All recorded inventory changes, newest first. Select a device to see its full history.' :
@@ -291,13 +286,20 @@
     $('#dialog').showModal();
   }
 
-  function createDeviceType() {
-    openDialog('Create Device Type', 'Enter a name for the new device type.',
-      '<label>Device type name<input name="name" maxlength="30" required></label>',
-      async form => {
-        state.desktop_preset = await request('preset', 'POST', { version: state.desktop_preset.version, name: form.name });
-        presetType = form.name.trim();
-      });
+  function deviceTypeOptions(selectedType, allowCreate = false) {
+    const action = '<option value="' + createTypeAction + '">Create device type...</option>';
+    const choices = types.map(type => (allowCreate && type === 'Other' ? action : '') + options([type], selectedType)).join('');
+    return choices + (allowCreate && !types.includes('Other') ? action : '');
+  }
+
+  function syncDeviceTypes() {
+    types = otherLast(state.desktop_preset.device_types);
+    for (const selector of [$('#type-filter'), $('#dialog-fields select[name="device_type"]')]) {
+      if (!selector) continue;
+      const selectedType = selector.value;
+      selector.innerHTML = selector === $('#type-filter') ? '<option value="">All types</option>' + options(types, selectedType) : deviceTypeOptions(selectedType, true);
+      selector.value = selectedType;
+    }
   }
 
   function deviceValueMarkup(value) {
@@ -326,15 +328,38 @@
     const preset = state.desktop_preset;
     if (!preset) { panel.innerHTML = '<p class="empty-state">Refresh to load the Desktop preset.</p>'; return; }
     const presetTypes = types.filter(type => type !== 'Other');
-    if (!presetTypes.includes(presetType)) presetType = '';
+    if (!presetTypes.includes(presetType) && presetType !== createTypeAction) presetType = '';
+    const creating = presetType === createTypeAction;
     const fields = presetDrafts.get(presetType) || preset.presets?.[presetType] || (presetType === 'Desktop' ? preset.fields : []);
-    panel.innerHTML = `<label>Device type<select id="preset-type"><option value="">Select device type</option>${options(presetTypes, presetType)}</select></label><form id="preset-form"${presetType ? '' : ' hidden'}><h2>${esc(presetType)}</h2><p>Drag the reorder handle to arrange fields, or use the arrow buttons. Add and arrange specification names. Enter values when adding a device. Saving affects future creation only.</p><div id="preset-editor">${fields.map(item => specMarkup(item.name, item.value, true)).join('')}</div><div class="action-row"><button type="button" class="button" id="preset-add">Add specification</button><button type="submit" class="button primary">Save preset</button></div><p id="preset-status" role="status"></p></form>`;
+    panel.innerHTML = `<label>Device type<select id="preset-type"><option value="">Select device type</option>${options(presetTypes, presetType)}<option value="${createTypeAction}"${creating ? ' selected' : ''}>Create device type...</option></select></label><form id="preset-form"${presetType && !creating ? '' : ' hidden'}><h2>${esc(presetType)}</h2><p>Drag the reorder handle to arrange fields, or use the arrow buttons. Add and arrange specification names. Enter values when adding a device. Saving affects future creation only.</p><div id="preset-editor">${fields.map(item => specMarkup(item.name, item.value, true)).join('')}</div><div class="action-row"><button type="button" class="button" id="preset-add">Add specification</button><button type="submit" class="button primary">Save preset</button></div><p id="preset-status" role="status"></p></form><form id="create-type-form"${creating ? '' : ' hidden'}><label>Device type name<input name="type_name" id="new-type-name" maxlength="30" required></label><button type="submit" class="button">Save device type</button><p id="type-status" role="status"></p></form>`;
     $('#preset-type').addEventListener('change', () => {
-      if (presetType && canEdit) presetDrafts.set(presetType, readSpecs($('#preset-editor')));
+      if (presetType && presetType !== createTypeAction && canEdit) presetDrafts.set(presetType, readSpecs($('#preset-editor')));
       presetType = $('#preset-type').value;
       renderPreset();
+      if (presetType === createTypeAction) $('#new-type-name').focus();
     });
     if (!canEdit) { panel.querySelectorAll('input, textarea, button, [data-preset-value]').forEach(element => { element.disabled = true; }); return; }
+    $('#create-type-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      if (button) button.disabled = true;
+      try {
+        const name = $('#new-type-name').value.trim();
+        if (presetType && presetType !== createTypeAction) presetDrafts.set(presetType, readSpecs($('#preset-editor')));
+        state.desktop_preset = await request('preset', 'POST', { version: preset.version, name });
+        syncDeviceTypes();
+        if (selectCreatedType) {
+          const selector = $('#dialog-fields select[name="device_type"]');
+          selector.value = name;
+          selector.dispatchEvent(new Event('change', { bubbles: true }));
+          selectCreatedType = false;
+        }
+        presetType = name;
+        renderPreset();
+        $('#preset-status').textContent = name + ' created. Add its specification names below.';
+      } catch (error) { $('#type-status').textContent = error.message; }
+      finally { if (button) button.disabled = false; }
+    });
     const editor = $('#preset-editor');
     let dragged = null;
     editor.addEventListener('dragstart', event => {
@@ -388,7 +413,7 @@
     const locationOptions = (missingBranch ? `<option value="${Number(branchId)}" selected>${esc(device.location || 'Unavailable branch')}</option>` : '') +
       state.branches.map(branch => `<option value="${branch.id}"${branch.id === branchId ? ' selected' : ''}>${esc(branch.name)}</option>`).join('');
     openDialog(device ? 'Edit device' : 'Add device', 'Serial numbers and asset tags may be blank when unknown.',
-      `<div class="field-row"><label>Device type<select name="device_type">${options(types, device?.device_type || initialType)}</select></label>${field('Brand / model *', 'name', device?.name, 'required')}</div>
+      `<div class="field-row"><div><div class="device-type-heading"><label for="device-type">Device type</label>${!device ? '<button type="button" class="text-button" id="manage-preset">Manage preset</button>' : ''}</div><select id="device-type" name="device_type">${deviceTypeOptions(device?.device_type || initialType, !device)}</select></div>${field('Brand / model *', 'name', device?.name, 'required')}</div>
       <div class="field-row">${field('Serial number', 'serial_number', device?.serial_number)}${field('Asset tag', 'asset_tag', device?.asset_tag)}</div>
       <div class="field-row"><label>Condition<select name="device_condition">${options(conditions, device?.device_condition || 'Unknown')}</select></label><label>Location<select name="location_branch_id"><option value="">Not recorded</option>${locationOptions}</select></label></div>
       <label>Evidence photos (optional)<input id="evidence-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small>Paste an image with Ctrl+V anywhere in this form, or choose files. Up to 5 JPEG, PNG or WebP photos, 20 MiB and 40 megapixels each. Large photos are compressed before upload. Photos are saved when you select Save.</small></label><div id="evidence-selection" aria-live="polite"></div>
@@ -423,6 +448,16 @@
     };
     for (const [key, value] of Object.entries(device?.specifications || {})) addSpec(key, value);
     if (!device) {
+      const openPreset = (creating = false) => {
+        presetDrafts.clear();
+        selectCreatedType = creating;
+        const type = $('#dialog-fields select[name="device_type"]').value;
+        presetType = creating ? createTypeAction : type === 'Other' ? '' : type;
+        renderPreset();
+        $('#preset-dialog').showModal();
+        if (creating) $('#new-type-name').focus();
+      };
+      $('#manage-preset').addEventListener('click', () => openPreset());
       const drafts = new Map();
       const selector = $('#dialog-fields select[name="device_type"]');
       let currentType = initialType;
@@ -432,7 +467,14 @@
         fields.forEach(item => addSpec(item.name, item.value));
       };
       populate(initialType);
-      selector.addEventListener('change', () => { drafts.set(currentType, readSpecs($('#spec-editor'))); currentType = selector.value; populate(currentType); });
+      selector.addEventListener('change', () => {
+        if (selector.value === createTypeAction) {
+          selector.value = currentType;
+          openPreset(true);
+          return;
+        }
+        drafts.set(currentType, readSpecs($('#spec-editor'))); currentType = selector.value; populate(currentType);
+      });
     }
     $('#add-specification').addEventListener('click', () => addSpec());
     $('#spec-editor').addEventListener('change', event => {
@@ -523,12 +565,12 @@
           field('Full name *', 'name', '', 'required') + field('Job title / affiliation', 'job_title') +
           '<label>Branch<input value="Other" readonly></label>',
           async form => { await request('associate', 'POST', form); });
-      } else if (view === 'preset') createDeviceType();
-      else editDevice(null, 'Laptop');
+      } else editDevice(null, 'Laptop');
     }
     if (target.id === 'edit-device') editDevice(chosen());
     if (target.id === 'assign-device') assignDevice();
     if (target.id === 'clear-person') { employeeFilter = null; render(); }
+    if (target.id === 'close-preset') $('#preset-dialog').close();
     if (target.id === 'close-dialog' || target.id === 'cancel-dialog') $('#dialog').close();
     if (target.id === 'add-note') {
       const device = chosen();
@@ -555,7 +597,12 @@
     finally { button.disabled = false; }
   }
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && selected && !$('#dialog').open && !$('#import-dialog').open && !$('#photo-viewer').open) {
+    if (event.key === 'Escape' && $('#preset-dialog').open) {
+      event.preventDefault();
+      $('#preset-dialog').close();
+      return;
+    }
+    if (event.key === 'Escape' && selected && !$('#preset-dialog').open && !$('#dialog').open && !$('#import-dialog').open && !$('#photo-viewer').open) {
       event.preventDefault();
       closeDetail();
     }

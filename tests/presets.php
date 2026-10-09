@@ -22,6 +22,7 @@ try {
     $beforeDevices = $service->devices();
     $custom = $preset->save(['version' => 2, 'name' => '  Router  ']);
     check(in_array('Router', $preset->read()['device_types'], true), 'New device types persist with trimmed names');
+    check($custom['device_types'][array_key_last($custom['device_types'])] === 'Other', 'Other remains last after creating a custom type');
     check($custom['fields'] === [], 'Creating a type preserves Desktop defaults');
     check($service->devices() === $beforeDevices, 'Preset and type changes leave existing devices and specifications untouched');
     rejects(static fn () => $preset->save(['version' => 3, 'name' => 'router']));

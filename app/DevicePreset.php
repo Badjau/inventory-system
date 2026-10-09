@@ -15,6 +15,8 @@ final class DevicePreset
         $data = is_file($this->path) ? json_decode(file_get_contents($this->path), true, 32, JSON_THROW_ON_ERROR) :
             ['version' => 0, 'fields' => array_map(static fn ($name) => ['name' => $name, 'value' => ''], self::DESKTOP)];
         $types = $data['device_types'] ?? InventoryService::TYPES;
+        $types = [...array_values(array_filter($types, static fn ($type) => $type !== 'Other')),
+            ...array_values(array_filter($types, static fn ($type) => $type === 'Other'))];
         $presets = [];
         foreach ($types as $type) {
             if ($type === 'Other') continue;
@@ -63,7 +65,8 @@ final class DevicePreset
                     if (mb_strtolower($type) === mb_strtolower($name)) throw new ValidationException('That device type already exists.');
                 }
                 if (count($types) >= 128) throw new ValidationException('Use up to 128 device types.');
-                $types[] = $name;
+                $types = [...array_values(array_filter($types, static fn ($type) => $type !== 'Other')), $name,
+                    ...array_values(array_filter($types, static fn ($type) => $type === 'Other'))];
             }
             $presets = $current['presets'];
             if ($creatingType) $presets[$name] = [];

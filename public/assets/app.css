@@ -22,3 +22,9 @@ body[data-role="viewer"] #import-excel { display: none; }
   #preset-panel { padding: 16px; }
 }
 .activity-scroll { overflow-anchor: none; }
+
+.preset-modal { width: min(780px, calc(100% - 24px)); }
+#manage-preset { margin: 0; padding: 0; font-size: 12px; }
+.device-type-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.device-type-heading label { margin: 0; }
+#create-type-form { display: grid; gap: 12px; margin-top: 12px; }

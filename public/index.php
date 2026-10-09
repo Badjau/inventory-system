@@ -45,7 +45,6 @@ if (!$user) {
       <button class="nav-item" data-view="shared" aria-label="Shared devices"><span aria-hidden="true">▤</span><span class="sidebar-text">Shared devices</span><b id="count-shared">0</b></button>
       <button class="nav-item" data-view="attention" aria-label="Needs attention"><span aria-hidden="true">⚑</span><span class="sidebar-text">Needs attention</span><b id="count-attention">0</b></button>
       <button class="nav-item" data-view="activity" aria-label="Activity"><span aria-hidden="true">◷</span><span class="sidebar-text">Activity</span></button>
-      <button class="nav-item" data-view="preset" aria-label="Preset"><span aria-hidden="true">≡</span><span class="sidebar-text">Preset</span></button>
     </nav>
     <div class="sidebar-bottom"><div class="profile"><span class="avatar">IT</span><div class="sidebar-text"><?= htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') ?><small><?= $user['role'] === 'editor' ? 'Editor' : 'Read-only' ?></small></div></div>
       <form action="login.php" method="post"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8') ?>"><button class="text-button sidebar-signout" name="logout" value="1" aria-label="Sign out"><span aria-hidden="true">↪</span><span class="sidebar-text">Sign out</span></button></form>
@@ -57,7 +56,6 @@ if (!$user) {
       <div id="notice" role="status" hidden></div>
       <div id="error" role="alert" hidden></div>
       <div id="stats" class="stats"></div>
-      <section id="preset-panel" class="inventory-panel" aria-label="Device presets" hidden></section>
       <div id="inventory-layout" class="inventory-layout">
         <section class="inventory-panel" aria-label="Directory">
           <div class="toolbar">
@@ -82,6 +80,10 @@ if (!$user) {
     <div class="modal-body"><div id="dialog-fields"></div><p id="form-error" role="alert" hidden></p></div>
     <div class="modal-footer"><span>Changes are saved to inventory.</span><div><button class="button" type="button" id="cancel-dialog">Cancel</button><button class="button primary" type="submit" id="save-dialog">Save</button></div></div>
   </form>
+</dialog>
+<dialog id="preset-dialog" class="modal preset-modal" aria-labelledby="preset-dialog-title">
+  <div class="modal-header"><div><h2 id="preset-dialog-title">Manage presets</h2><p>Save specification names for future devices. Your current device draft stays intact.</p></div><button type="button" class="close-button" id="close-preset" aria-label="Close preset settings">&#215;</button></div>
+  <section id="preset-panel" aria-label="Device presets"></section>
 </dialog>
 <noscript><p>Enable JavaScript to use inventory.</p></noscript>
 <dialog id="photo-viewer" class="photo-viewer" aria-labelledby="photo-viewer-title">
