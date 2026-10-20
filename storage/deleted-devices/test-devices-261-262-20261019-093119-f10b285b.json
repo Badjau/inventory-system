@@ -1,0 +1,96 @@
+{
+    "archived_at": "2026-10-19T09:31:19+00:00",
+    "reason": "User requested deletion of test devices #261 Desktop and #262 CPU: INTEL CPU.",
+    "actor": {
+        "name": "System \/ CLI"
+    },
+    "records": [
+        {
+            "device": {
+                "id": 261,
+                "import_key": null,
+                "device_type": "Desktop",
+                "name": "Desktop",
+                "serial_number": null,
+                "asset_tag": null,
+                "device_condition": "Unknown",
+                "location": "Apo",
+                "location_branch_id": 1,
+                "holder_kind": "unassigned",
+                "hr_employee_id": null,
+                "associate_id": null,
+                "holder_name": null,
+                "department": null,
+                "department_id": null,
+                "branch": null,
+                "job_title": null,
+                "handover_date": null,
+                "specifications_json": "{\"CPU\":\"INTEL CPU\",\"RAM\":\"16GB\"}",
+                "source_json": null,
+                "version": 2,
+                "created_at": "2026-10-19 17:28:22",
+                "updated_at": "2026-10-19 17:28:32",
+                "lifecycle_status": "for_disposal"
+            },
+            "events": [
+                {
+                    "id": 1690,
+                    "device_id": 261,
+                    "event_type": "create",
+                    "message": "Device registered; available for assignment.",
+                    "handover_date": null,
+                    "snapshot_json": "{\"actor\":{\"id\":9,\"name\":\"Elijah\",\"username\":\"franzelijah.vasquez\"},\"before\":null,\"after\":{\"id\":261,\"import_key\":null,\"device_type\":\"Desktop\",\"name\":\"Desktop\",\"serial_number\":null,\"asset_tag\":null,\"device_condition\":\"Unknown\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"associate_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-19 17:28:22\",\"updated_at\":\"2026-10-19 17:28:22\",\"lifecycle_status\":\"active\",\"specifications\":{\"CPU\":\"INTEL CPU\",\"RAM\":\"16GB\"},\"source\":null}}",
+                    "recorded_at": "2026-10-19 17:28:22"
+                },
+                {
+                    "id": 1691,
+                    "device_id": 261,
+                    "event_type": "disposal",
+                    "message": "Marked For disposal; recovered 1 components.",
+                    "handover_date": "2026-10-19",
+                    "snapshot_json": "{\"actor\":{\"id\":9,\"name\":\"Elijah\",\"username\":\"franzelijah.vasquez\"},\"before\":{\"id\":261,\"import_key\":null,\"device_type\":\"Desktop\",\"name\":\"Desktop\",\"serial_number\":null,\"asset_tag\":null,\"device_condition\":\"Unknown\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"associate_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-19 17:28:22\",\"updated_at\":\"2026-10-19 17:28:22\",\"lifecycle_status\":\"active\",\"specifications\":{\"CPU\":\"INTEL CPU\",\"RAM\":\"16GB\"},\"source\":null},\"after\":{\"id\":261,\"import_key\":null,\"device_type\":\"Desktop\",\"name\":\"Desktop\",\"serial_number\":null,\"asset_tag\":null,\"device_condition\":\"Unknown\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"associate_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":2,\"created_at\":\"2026-10-19 17:28:22\",\"updated_at\":\"2026-10-19 17:28:32\",\"lifecycle_status\":\"for_disposal\",\"specifications\":{\"CPU\":\"INTEL CPU\",\"RAM\":\"16GB\"},\"source\":null},\"recovery\":{\"original_device_id\":261,\"recovered_device_ids\":[262],\"specifications\":{\"CPU\":\"INTEL CPU\"},\"disposal_date\":\"2026-10-19\"}}",
+                    "recorded_at": "2026-10-19 17:28:32"
+                }
+            ]
+        },
+        {
+            "device": {
+                "id": 262,
+                "import_key": null,
+                "device_type": "Other",
+                "name": "CPU: INTEL CPU",
+                "serial_number": null,
+                "asset_tag": null,
+                "device_condition": "Unknown",
+                "location": "Apo",
+                "location_branch_id": 1,
+                "holder_kind": "unassigned",
+                "hr_employee_id": null,
+                "associate_id": null,
+                "holder_name": null,
+                "department": null,
+                "department_id": null,
+                "branch": null,
+                "job_title": null,
+                "handover_date": null,
+                "specifications_json": "{\"CPU\":\"INTEL CPU\"}",
+                "source_json": null,
+                "version": 1,
+                "created_at": "2026-10-19 17:28:32",
+                "updated_at": "2026-10-19 17:28:32",
+                "lifecycle_status": "active"
+            },
+            "events": [
+                {
+                    "id": 1692,
+                    "device_id": 262,
+                    "event_type": "recovery",
+                    "message": "Component recovered from device #261; available for assignment.",
+                    "handover_date": "2026-10-19",
+                    "snapshot_json": "{\"actor\":{\"id\":9,\"name\":\"Elijah\",\"username\":\"franzelijah.vasquez\"},\"before\":null,\"after\":{\"id\":262,\"import_key\":null,\"device_type\":\"Other\",\"name\":\"CPU: INTEL CPU\",\"serial_number\":null,\"asset_tag\":null,\"device_condition\":\"Unknown\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"associate_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-19 17:28:32\",\"updated_at\":\"2026-10-19 17:28:32\",\"lifecycle_status\":\"active\",\"specifications\":{\"CPU\":\"INTEL CPU\"},\"source\":null},\"recovery\":{\"original_device_id\":261,\"recovered_device_ids\":[262],\"specifications\":{\"CPU\":\"INTEL CPU\"},\"disposal_date\":\"2026-10-19\"}}",
+                    "recorded_at": "2026-10-19 17:28:32"
+                }
+            ]
+        }
+    ]
+}

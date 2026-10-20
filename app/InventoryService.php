@@ -93,6 +93,7 @@ final class InventoryService
 
     private function decode(array $row): array
     {
+        $row['lifecycle_status'] ??= 'active';
         foreach (['id', 'version'] as $field) {
             $row[$field] = (int) $row[$field];
         }
@@ -116,9 +117,15 @@ final class InventoryService
         $query->execute($deviceId === null ? [] : [$deviceId]);
         $events = array_map(static function (array $event): array {
             $snapshot = json_decode($event['snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
+            $event['handover'] = self::handover($snapshot);
+            $event['holder_names'] = array_values(array_unique(array_filter([
+                $snapshot['before']['holder_name'] ?? null,
+                $snapshot['after']['holder_name'] ?? null,
+            ], static fn ($name): bool => is_string($name) && trim($name) !== '')));
             $event['photos'] = $snapshot['evidence_photos'] ?? [];
             $event['actor'] = $snapshot['actor'] ?? null;
             $event['removed_photo'] = $snapshot['removed_photo'] ?? null;
+            $event['recovery'] = $snapshot['recovery'] ?? null;
             unset($event['snapshot_json']);
             return $event;
         }, $query->fetchAll());
@@ -127,6 +134,33 @@ final class InventoryService
         foreach ($events as &$event) $event['removed_photo_indexes'] = $removed[$event['id']] ?? [];
         unset($event);
         return $events;
+    }
+
+    /** A small history projection; never expose complete source/device snapshots. */
+    public static function handover(array $snapshot): ?array
+    {
+        $holder = static function (?array $device): array {
+            $kind = $device['holder_kind'] ?? 'unassigned';
+            return ['kind' => $kind,
+                'id' => match ($kind) {
+                    'employee' => isset($device['hr_employee_id']) ? (int) $device['hr_employee_id'] : null,
+                    'associate' => isset($device['associate_id']) ? (int) $device['associate_id'] : null,
+                    'shared' => isset($device['department_id']) ? (int) $device['department_id'] : null,
+                    default => null,
+                },
+                'name' => $kind === 'unassigned' ? 'Available pool' : ($kind === 'shared'
+                    ? ($device['department'] ?? 'Shared department') : ($device['holder_name'] ?? 'Recorded holder'))];
+        };
+        $before = $snapshot['before'] ?? null;
+        $after = $snapshot['after'] ?? null;
+        if (!$after) return null;
+        $from = $holder($before);
+        $to = $holder($after);
+        // Renaming a linked person, editing dates, and device edits are not handovers.
+        if ($from['kind'] === $to['kind'] && $from['id'] === $to['id']
+            && ($from['id'] !== null || $from['name'] === $to['name'])) return null;
+        return ['from' => $before === null ? null : $from, 'to' => $to,
+            'device_name' => $after['name'] ?? 'Device', 'device_type' => $after['device_type'] ?? 'Other'];
     }
 
     public static function text(array $input, string $field, bool $required = false, int $max = 255): ?string
@@ -250,6 +284,7 @@ final class InventoryService
                 $id = self::positiveInt($input['id'], 'device ID');
                 $version = self::positiveInt($input['version'] ?? null, 'version');
                 $before = $this->device($id);
+                $this->requireActive($before);
                 $this->update($id, $version, $values);
                 $specs = json_decode($values['specifications_json'], true, 512, JSON_THROW_ON_ERROR);
                 $changes = [];
@@ -274,6 +309,33 @@ final class InventoryService
                 $this->event($id, 'create', 'Device registered; available for assignment.' . ($photos ? ' Evidence photos attached: ' . count($photos) . '.' : ''), photos: $photos);
             }
             return $this->device($id);
+        });
+    }
+
+    public function importPhoto(int $id, int $version, array $photo, array $source): array
+    {
+        return $this->transaction(function () use ($id, $version, $photo, $source): array {
+            // Serialize imports for the same device before checking duplicates.
+            if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $lock = $this->db->prepare('SELECT id FROM inv_devices WHERE id = ? FOR UPDATE');
+                $lock->execute([$id]);
+                $lock->fetchColumn();
+            }
+            $before = $this->device($id);
+            $this->requireActive($before);
+            $query = $this->db->prepare("SELECT JSON_EXTRACT(snapshot_json, '$.photo_import') AS imported FROM inv_events WHERE device_id = ? AND event_type = 'photo-import'");
+            $query->execute([$id]);
+            foreach ($query->fetchAll() as $event) {
+                $imported = json_decode($event['imported'] ?? 'null', true, 32, JSON_THROW_ON_ERROR);
+                if ($imported && ($imported['source_hash'] === $source['contentHash'] || $imported['stored_hash'] === $photo['sha256'])) {
+                    return ['skipped' => true, 'device' => $before];
+                }
+            }
+            $this->update($id, $version, []);
+            $this->event($id, 'photo-import', 'Evidence photo imported: ' . $source['file'], before: $before, photos: [$photo],
+                extra: ['photo_import' => ['source_hash' => $source['contentHash'], 'stored_hash' => $photo['sha256'],
+                    'source_file' => $source['file'], 'extracted_name' => $source['name']]]);
+            return ['skipped' => false, 'device' => $this->device($id)];
         });
     }
 
@@ -315,11 +377,60 @@ final class InventoryService
         }
         return $this->transaction(function () use ($id, $version, $kind, $values, $target, $date, $notes): array {
             $before = $this->device($id);
+            $this->requireActive($before);
             $previous = $before['holder_kind'] === 'shared' ? $before['department'] : ($before['holder_name'] ?? 'unassigned pool');
             $this->update($id, $version, $values);
             $this->event($id, $kind === 'unassigned' ? 'return' : 'assign',
                 "Holder changed from $previous to $target." . ($notes ? " $notes" : ''), $date, $before);
             return $this->device($id);
+        });
+    }
+
+    private function requireActive(array $device): void
+    {
+        if ($device['lifecycle_status'] !== 'active') {
+            throw new ValidationException('This device is permanently marked For disposal. Assignment and device edits are unavailable.', 409);
+        }
+    }
+
+    public function disposal(array $input): array
+    {
+        $id = self::positiveInt($input['id'] ?? null, 'device ID');
+        $version = self::positiveInt($input['version'] ?? null, 'version');
+        $date = self::text($input, 'disposal_date', true);
+        self::validateDate($date);
+        $notes = self::text($input, 'notes', max: 2000);
+        $names = $input['specification_names'] ?? [];
+        if (!is_array($names) || !array_is_list($names) || count($names) > 128) throw new ValidationException('Invalid component selections.');
+        return $this->transaction(function () use ($id, $version, $date, $notes, $names): array {
+            $before = $this->device($id);
+            $this->requireActive($before);
+            $selected = [];
+            foreach ($names as $name) {
+                if (!is_string($name) || isset($selected[$name]) || !isset($before['specifications'][$name]) || trim($before['specifications'][$name]) === '') {
+                    throw new ValidationException('Select each existing populated specification at most once.');
+                }
+                $value = $before['specifications'][$name];
+                self::text(['name' => "$name: $value"], 'name', true);
+                $selected[$name] = $value;
+            }
+            $this->update($id, $version, ['lifecycle_status' => 'for_disposal', 'holder_kind' => 'unassigned',
+                'hr_employee_id' => null, 'associate_id' => null, 'holder_name' => null, 'department' => null,
+                'department_id' => null, 'branch' => null, 'job_title' => null, 'handover_date' => null]);
+            $recovered = [];
+            foreach ($selected as $name => $value) {
+                $recovered[] = $this->insert(['device_type' => 'Other', 'name' => "$name: $value", 'device_condition' => 'Unknown',
+                    'location' => $before['location'], 'location_branch_id' => $before['location_branch_id'],
+                    'specifications_json' => json_encode([$name => $value], JSON_THROW_ON_ERROR)]);
+            }
+            $metadata = ['original_device_id' => $id, 'recovered_device_ids' => $recovered, 'specifications' => $selected, 'disposal_date' => $date];
+            $this->event($id, 'disposal', 'Marked For disposal; recovered ' . count($recovered) . ' components.' . ($notes ? " $notes" : ''),
+                $date, $before, extra: ['recovery' => $metadata]);
+            foreach ($recovered as $componentId) {
+                $this->event($componentId, 'recovery', "Component recovered from device #$id; available for assignment.", $date,
+                    extra: ['recovery' => $metadata]);
+            }
+            return ['device' => $this->device($id), 'recovered_device_ids' => $recovered];
         });
     }
 
@@ -369,6 +480,7 @@ final class InventoryService
             foreach ($records as $record) {
                 $id = $record['target_id'];
                 $before = $id === null ? null : $this->device($id);
+                if ($before) $this->requireActive($before);
                 if ($before && $before['version'] !== $record['target_version']) throw new ValidationException('A previewed device changed. Upload again to review current information.', 409);
                 if (isset($seen[$id ?? $record['import_key'] ?? 'new:' . $record['source']['row']])) throw new ValidationException('Repeated import target.');
                 $seen[$id ?? $record['import_key'] ?? 'new:' . $record['source']['row']] = true;
@@ -457,6 +569,7 @@ final class InventoryService
                 $id = $query->fetchColumn();
                 if ($id === false) continue;
                 $before = $this->device((int) $id);
+                if ($before['lifecycle_status'] !== 'active') continue;
                 $values = [];
                 if ($before['location_branch_id'] === null && !$before['location']) {
                     $values['location_branch_id'] = $record['location_branch_id'];
@@ -484,6 +597,7 @@ final class InventoryService
         return $this->transaction(function () use ($names): array {
             $updated = 0;
             foreach ($this->devices() as $before) {
+                if ($before['lifecycle_status'] !== 'active') continue;
                 if (!$before['department']) continue;
                 $department = $names->required($names->display($before)['department']);
                 if ($before['department_id'] === (int) $department['id'] && $before['department'] === $department['name']) continue;
@@ -501,6 +615,7 @@ final class InventoryService
         return $this->transaction(function () use ($date): array {
             $updated = $skipped = 0;
             foreach ($this->devices() as $before) {
+                if ($before['lifecycle_status'] !== 'active') continue;
                 if ($before['device_condition'] === 'Good' && $before['handover_date'] === $date) {
                     $skipped++;
                     continue;

@@ -1,0 +1,13 @@
+.photo-import-row { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 16px; }
+.photo-import-preview img { width: 128px; height: 128px; object-fit: contain; background: #f3f4f6; border-radius: 6px; }
+.photo-import-fields { min-width: 0; }
+.photo-import-fields p, .photo-import-fields label { overflow-wrap: anywhere; }
+.photo-import-suggestions { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0; }
+.photo-import-suggestions button { text-align: left; }
+#photo-import-error { color: #863d2c; background: #fff1ec; padding: 12px; }
+#photo-import-status { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .photo-import-row { grid-template-columns: minmax(0, 1fr); }
+  #photo-import-dialog .modal-footer { align-items: stretch; flex-direction: column; }
+  #photo-import-dialog .modal-footer > div { flex-wrap: wrap; }
+}

@@ -9,7 +9,7 @@ use ZipArchive;
 final class WorkbookExchange
 {
     private const FIELDS = ['id' => 'Inventory ID', 'import_key' => 'Source key', 'device_type' => 'Device type',
-        'name' => 'Device name', 'serial_number' => 'Serial number', 'asset_tag' => 'Asset tag',
+        'name' => 'Device name', 'lifecycle_status' => 'Lifecycle status', 'serial_number' => 'Serial number', 'asset_tag' => 'Asset tag',
         'device_condition' => 'Condition', 'holder_kind' => 'Holder kind', 'hr_employee_id' => 'HR employee ID', 'associate_id' => 'Associate ID',
         'holder_name' => 'Recorded holder', 'department_id' => 'Department ID', 'department' => 'Department',
         'branch' => 'Holder branch', 'job_title' => 'Job title', 'location_branch_id' => 'Location branch ID',
@@ -21,7 +21,7 @@ final class WorkbookExchange
         if (count($headers) !== count(array_unique($headers))) throw new ValidationException('Duplicate export headers.');
         $columns = array_flip($headers);
         foreach (self::FIELDS as $field => $header) {
-            if ($field === 'associate_id') continue; // Older exports remain valid.
+            if (in_array($field, ['associate_id', 'lifecycle_status'], true)) continue; // Older exports remain valid.
             if (!isset($columns[$header])) throw new ValidationException("Missing export column: $header.");
         }
         $records = [];

@@ -222,6 +222,7 @@ try {
     $edited = $service->save(['id' => $id, 'version' => 2, 'device_type' => 'Laptop', 'name' => 'Edited device',
         'device_condition' => 'Needs attention', 'specifications' => []]);
     check($edited['holder_name'] === 'Alex Santos' && $edited['version'] === 3, 'Editing preserves assignment');
+    check($service->history($id)[0]['handover'] === null, 'Device edits are excluded from person handovers');
     check(str_contains($service->history($id)[0]['message'], 'CPU removed (was: Test CPU)'),
         'Edit history describes removed specifications');
     rejects(static fn () => $service->save(['id' => $id, 'version' => 2, 'device_type' => 'Laptop', 'name' => 'Stale', 'device_condition' => 'Good']), 409);
@@ -230,6 +231,9 @@ try {
     check($returned['handover_date'] === null, 'Return clears the current handover date');
     $event = $db->query('SELECT snapshot_json FROM inv_events ORDER BY id DESC LIMIT 1')->fetchColumn();
     check(json_decode($event, true)['before']['holder_name'] === 'Alex Santos', 'Return history retains previous holder');
+    check($service->history($id)[0]['holder_names'] === ['Alex Santos'], 'History exposes former holder names for device search');
+    check($service->history($id)[0]['handover']['from']['id'] === 1
+        && $service->history($id)[0]['handover']['to']['kind'] === 'unassigned', 'History projects the numeric former holder after return');
     rejects(static fn () => $service->assign(['id' => $id, 'version' => 4, 'holder_kind' => 'shared', 'department' => ''], $hr));
     $shared = $service->assign(['id' => $id, 'version' => 4, 'holder_kind' => 'shared', 'department' => 'Accounting'], $hr);
     check($shared['department'] === 'Accounting' && $shared['hr_employee_id'] === null, 'Shared assignment');
@@ -400,8 +404,11 @@ try {
     rejects(static fn () => InventoryService::positiveInt(1.5, 'device ID'));
     require __DIR__ . '/evidence.php';
     require __DIR__ . '/photo-removal.php';
+    require __DIR__ . '/photo-import.php';
     require __DIR__ . '/actors.php';
+    require __DIR__ . '/handovers.php';
     require __DIR__ . '/presets.php';
+    require __DIR__ . '/disposal.php';
     echo "PASS: $assertions assertions (" . ($mysql ? 'MySQL' : 'isolated SQLite fixture') . ").\n";
 } catch (Throwable $error) {
     fwrite(STDERR, 'FAIL: ' . $error->getMessage() . PHP_EOL . $error->getTraceAsString() . PHP_EOL);

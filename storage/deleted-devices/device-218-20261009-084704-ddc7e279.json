@@ -1,0 +1,52 @@
+{
+    "archived_at": "2026-10-09T08:47:04+00:00",
+    "reason": "User requested deletion of device #218 ViewPro AIO.",
+    "actor": {
+        "name": "System \/ CLI"
+    },
+    "device": {
+        "id": 218,
+        "import_key": null,
+        "device_type": "Desktop",
+        "name": "ViewPro AIO",
+        "serial_number": "TOBECHECKED",
+        "asset_tag": null,
+        "device_condition": "Good",
+        "location": "Apo",
+        "location_branch_id": 1,
+        "holder_kind": "unassigned",
+        "hr_employee_id": null,
+        "associate_id": null,
+        "holder_name": null,
+        "department": null,
+        "department_id": null,
+        "branch": null,
+        "job_title": null,
+        "handover_date": null,
+        "specifications_json": "{\"Note\":\"all in one pc used by Franz Elijah Vasquez\"}",
+        "source_json": null,
+        "version": 2,
+        "created_at": "2026-10-02 18:02:42",
+        "updated_at": "2026-10-02 18:09:54"
+    },
+    "events": [
+        {
+            "id": 1078,
+            "device_id": 218,
+            "event_type": "create",
+            "message": "Device registered; available for assignment.",
+            "handover_date": null,
+            "snapshot_json": "{\"before\":null,\"after\":{\"id\":218,\"import_key\":null,\"device_type\":\"Desktop\",\"name\":\"ViewPro\",\"serial_number\":\"TOBECHECKED\",\"asset_tag\":null,\"device_condition\":\"Good\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-02 18:02:42\",\"updated_at\":\"2026-10-02 18:02:42\",\"specifications\":{\"Note\":\"all in one pc used by Franz Elijah Vasquez\"},\"source\":null}}",
+            "recorded_at": "2026-10-02 18:02:42"
+        },
+        {
+            "id": 1079,
+            "device_id": 218,
+            "event_type": "edit",
+            "message": "Device details updated.",
+            "handover_date": null,
+            "snapshot_json": "{\"before\":{\"id\":218,\"import_key\":null,\"device_type\":\"Desktop\",\"name\":\"ViewPro\",\"serial_number\":\"TOBECHECKED\",\"asset_tag\":null,\"device_condition\":\"Good\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":1,\"created_at\":\"2026-10-02 18:02:42\",\"updated_at\":\"2026-10-02 18:02:42\",\"specifications\":{\"Note\":\"all in one pc used by Franz Elijah Vasquez\"},\"source\":null},\"after\":{\"id\":218,\"import_key\":null,\"device_type\":\"Desktop\",\"name\":\"ViewPro AIO\",\"serial_number\":\"TOBECHECKED\",\"asset_tag\":null,\"device_condition\":\"Good\",\"location\":\"Apo\",\"location_branch_id\":1,\"holder_kind\":\"unassigned\",\"hr_employee_id\":null,\"holder_name\":null,\"department\":null,\"department_id\":null,\"branch\":null,\"job_title\":null,\"handover_date\":null,\"version\":2,\"created_at\":\"2026-10-02 18:02:42\",\"updated_at\":\"2026-10-02 18:09:54\",\"specifications\":{\"Note\":\"all in one pc used by Franz Elijah Vasquez\"},\"source\":null}}",
+            "recorded_at": "2026-10-02 18:09:54"
+        }
+    ]
+}

@@ -13,6 +13,7 @@
   let presetType = '';
   const presetDrafts = new Map();
   let historyRequest = 0;
+  let profileTrail = [], handoverFilter = 'all', handoverLimit = 5;
   const csrf = $('meta[name="csrf-token"]').content;
   const canEdit = $('meta[name="inventory-role"]')?.content !== 'viewer';
   const icons = {
@@ -38,7 +39,7 @@
         thumbnailObserver.unobserve(image);
       });
     }, { rootMargin: '80px', threshold: 0.01 });
-    for (const container of [$('#table-body'), $('#detail')]) {
+    for (const container of [$('#table-body'), $('#detail'), $('#person-overview')]) {
       container.querySelectorAll('[data-thumbnail]').forEach(image => {
         image.addEventListener('load', () => image.classList.add('loaded'), { once: true });
         image.addEventListener('error', () => image.remove(), { once: true });
@@ -47,9 +48,9 @@
       });
     }
   }
-  const status = device => device.holder_kind === 'unassigned' ? 'Available' : 'Assigned';
-  const badge = device => `<span class="status ${device.holder_kind === 'unassigned' ? 'available' : 'assigned'}">${status(device)}</span>`;
-  const conditionBadge = device => `<span class="status ${attention(device) ? 'repair' : device.device_condition === 'Good' ? 'available' : 'unknown'}">${esc(device.device_condition)}</span>`;
+  const status = device => device.lifecycle_status === 'for_disposal' ? 'For disposal' : device.holder_kind === 'unassigned' ? 'Available' : 'Assigned';
+  const badge = device => `<span class="status ${device.lifecycle_status === 'for_disposal' ? 'for-disposal' : device.holder_kind === 'unassigned' ? 'available' : 'assigned'}">${status(device)}</span>`;
+  const conditionBadge = device => `<span class="status ${['Needs attention', 'Faulty'].includes(device.device_condition) ? 'repair' : device.device_condition === 'Good' ? 'available' : 'unknown'}">${esc(device.device_condition)}</span>`;
   const devices = () => state.devices.map(device => displayDevice(device, state.employees, state.branches));
   // Negative keys distinguish inventory associates from numeric HR IDs in UI filters only.
   const people = () => [...state.employees, ...(state.associates || []).map(person => ({ ...person,
@@ -115,9 +116,9 @@
     $('#count-attention').textContent = rows.filter(attention).length;
     const cards = [
       ['total', 'Total devices', rows.length, 'Individual inventory items'],
-      ['assigned', 'Assigned', rows.filter(device => device.holder_kind !== 'unassigned').length, 'People and shared departments'],
-      ['available', 'Available', rows.filter(device => device.holder_kind === 'unassigned').length, 'In the unassigned pool'],
-      ['attention', 'Needs attention', rows.filter(attention).length, 'Flagged by equipment condition']
+      ['assigned', 'Assigned', rows.filter(device => device.lifecycle_status !== 'for_disposal' && device.holder_kind !== 'unassigned').length, 'People and shared departments'],
+      ['available', 'Available', rows.filter(device => device.lifecycle_status !== 'for_disposal' && device.holder_kind === 'unassigned').length, 'In the unassigned pool'],
+      ['attention', 'Needs attention', rows.filter(attention).length, 'Condition issues or marked for disposal']
     ];
     const activeCard = view === 'attention' ? 'attention' : view === 'devices' ? ($('#status-filter').value || 'total') : '';
     $('#stats').innerHTML = cards.map(([key, label, count, description]) =>
@@ -133,16 +134,22 @@
     $('#table-scroll').classList.toggle('activity-scroll', view === 'activity');
     const rows = devices();
     renderStats(rows);
-    $('#page-title').textContent = titles[view];
+    $('#page-title').textContent = view === 'person' ? 'Person overview' : titles[view];
+    const profileVisible = view === 'person';
+    $('#workspace-content').classList.toggle('person-page', profileVisible);
+    $('#person-overview').hidden = !profileVisible;
+    $('#directory-panel').hidden = profileVisible;
+    $('#stats').hidden = profileVisible;
+    $('#inventory-layout').classList.toggle('person-layout', profileVisible);
     $('#add-device').textContent = view === 'people' ? '＋ Add User' : '＋ Add device';
     const filteredEmployee = people().find(employee => Number(employee.id) === Number(employeeFilter));
     $('#page-description').textContent = view === 'people' ? 'HR employees and inventory associates. Added users do not get reflected onto HR dashboard.' :
       view === 'activity' ? 'All recorded inventory changes, newest first. Select a device to see its full history.' :
       filteredEmployee ? `Equipment assigned to ${filteredEmployee.name}.` : 'Equipment and the people who hold it.';
     $('#search').placeholder = view === 'people' ? 'Search name, employee number, branch, department, or role…' :
-      view === 'activity' ? 'Search change, device ID, or user…' : 'Search device, holder, or spec: RAM: 16GB…';
+      view === 'activity' ? 'Search change, device ID, or user…' : 'Search device, current/past holder, or spec: RAM: 16GB…';
     $('#search').title = !['people', 'activity'].includes(view) ? 'Search specifications using name: value, e.g. RAM: 16GB or OS: Windows 11. Use the full specification name; values can be partial. Searches ignore case.' : '';
-    $('#navigation').querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === view));
+    $('#navigation').querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === (profileVisible ? 'people' : view)));
     const detailVisible = !['people', 'activity'].includes(view) && Boolean(chosen());
     $('#inventory-layout').classList.toggle('wide', !detailVisible);
     $('#inventory-layout').classList.toggle('drawer-open', detailVisible);
@@ -153,10 +160,17 @@
     $('#department-filter').hidden = view === 'activity';
     $('#branch-filter').hidden = view === 'activity';
     $('#clear-person').hidden = !employeeFilter || view === 'people' || view === 'activity';
+    if (profileVisible) {
+      $('#page-description').textContent = 'Current equipment and recorded handovers.';
+      renderPerson(rows);
+      renderDetail();
+      observeThumbnails();
+      return;
+    }
     if (view === 'people') { renderPeople(rows); return; }
     if (view === 'activity') { renderActivity(); return; }
     const visible = filterDevices(rows, { query: $('#search').value, type: $('#type-filter').value,
-      department: $('#department-filter').value, branch: $('#branch-filter').value, status: $('#status-filter').value, employee: employeeFilter, view });
+      department: $('#department-filter').value, branch: $('#branch-filter').value, status: $('#status-filter').value, employee: employeeFilter, view }, state.activity);
     $('#table-head').innerHTML = '<tr><th>Device</th><th>Serial / asset tag</th><th>Assigned to</th><th>Status</th><th>Condition</th></tr>';
     $('#table-body').innerHTML = visible.map(device => `<tr class="device-row ${device.id === selected ? 'selected-row' : ''}" data-device="${device.id}">
       <td><div class="device-cell"><span class="device-icon" aria-hidden="true">${portrait(device)}</span><div><button class="row-name" data-device="${device.id}" aria-controls="detail" aria-expanded="${device.id === selected}">${esc(device.name)}</button><small>${esc(device.device_type)} · #${device.id}</small></div></div></td>
@@ -187,8 +201,67 @@
       return countOrder || a.name.localeCompare(b.name);
     });
     $('#table-head').innerHTML = '<tr><th>Person</th><th>Branch</th><th>Department</th><th>Job title / HR role</th><th>Equipment</th></tr>';
-    $('#table-body').innerHTML = employees.map(employee => `<tr><td>${esc(employee.name)}<small>${esc(employee.employee_id)}</small></td><td>${esc(employee.branch || 'Not set')}</td><td>${esc(employee.department || 'Not set')}</td><td>${esc(employee.job_title)}<small>${esc(employee.hr_role)}</small></td><td><button class="button" data-person="${Number(employee.id)}">View devices (${equipmentCount(employee)})</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">No employees match your filters.</td></tr>';
+    $('#table-body').innerHTML = employees.map(employee => `<tr><td>${esc(employee.name)}<small>${esc(employee.employee_id)}</small></td><td>${esc(employee.branch || 'Not set')}</td><td>${esc(employee.department || 'Not set')}</td><td>${esc(employee.job_title)}<small>${esc(employee.hr_role)}</small></td><td><button class="button" data-person="${Number(employee.id)}">View overview (${equipmentCount(employee)})</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">No employees match your filters.</td></tr>';
     $('#table-footer').textContent = `${employees.length} people · HR employees and inventory associates`;
+  }
+
+  const holderKey = holder => holder?.kind === 'employee' && holder.id ? Number(holder.id) :
+    holder?.kind === 'associate' && holder.id ? -Number(holder.id) : null;
+  const belongsTo = (device, key) => device.holder_kind === 'employee' ? Number(device.hr_employee_id) === key :
+    device.holder_kind === 'associate' && -Number(device.associate_id) === key;
+  function profilePerson(key) {
+    const current = people().find(person => Number(person.id) === key);
+    if (current) return current;
+    for (const event of state.activity) {
+      for (const holder of [event.handover?.from, event.handover?.to]) {
+        if (holderKey(holder) === key) return { id: key, name: holder.name, employee_id: 'Historical record', historical: true };
+      }
+    }
+    return { id: key, name: 'Person unavailable', historical: true };
+  }
+  function holderMarkup(holder) {
+    if (!holder) return '<span class="person-pool">Initial recorded holder</span>';
+    const key = holderKey(holder);
+    if (key === employeeFilter) return `<strong>${esc(holder.name)}</strong>`;
+    return key ? `<button type="button" class="text-button" data-person="${key}">${esc(holder.name)}</button>` :
+      `<span class="person-pool">${esc(holder.name)}</span>`;
+  }
+  function openPerson(key) {
+    if (view === 'person') profileTrail.push({ key: employeeFilter, filter: handoverFilter, limit: handoverLimit, scroll: $('#person-overview').scrollTop });
+    else profileTrail = [];
+    employeeFilter = key;
+    selected = null;
+    view = 'person';
+    handoverFilter = 'all';
+    handoverLimit = 5;
+    render();
+    $('#person-overview').scrollTop = 0;
+    $('#person-heading').focus();
+  }
+  function renderPerson(rows) {
+    const person = profilePerson(employeeFilter);
+    const equipment = rows.filter(device => belongsTo(device, employeeFilter));
+    const handovers = state.activity.filter(event => event.handover &&
+      [event.handover.from, event.handover.to].some(holder => holderKey(holder) === employeeFilter));
+    const received = event => holderKey(event.handover.to) === employeeFilter;
+    const visible = handovers.filter(event => handoverFilter === 'all' || (handoverFilter === 'received' ? received(event) : !received(event)));
+    const date = event => event.handover_date ? `Handover ${event.handover_date}` : `Recorded ${event.recorded_at}`;
+    $('#person-overview').innerHTML = `
+      <button type="button" class="text-button person-back" id="person-back">← ${profileTrail.length ? 'Back to ' + esc(profilePerson(profileTrail[profileTrail.length - 1].key).name) : 'Back to People'}</button>
+      <header class="person-identity"><span class="person-initials" aria-hidden="true">${esc(person.name.split(/\s+/).filter(Boolean).map(word => word[0]).slice(0, 2).join(''))}</span><div><h2 id="person-heading" tabindex="-1">${esc(person.name)}</h2><p>${esc([person.job_title, person.department, person.branch].filter(Boolean).join(' · ') || 'Historical holder snapshot')}</p><small>${esc(person.employee_id || '')}${person.historical ? ' · No longer in the directory' : ''}</small></div><span class="person-kind">${person.historical ? 'Historical record' : employeeFilter < 0 ? 'Inventory associate' : 'HR employee'}</span></header>
+      <div class="person-summary"><div><span>Currently holding</span><strong>${equipment.length} <small>devices</small></strong></div><div><span>Recorded handovers</span><strong>${handovers.length}</strong></div><div><span>Latest recorded handover</span><strong class="person-last-date">${esc(handovers[0] ? date(handovers[0]) : 'None recorded')}</strong></div></div>
+      <div class="person-columns"><section class="person-card"><header><h3>Current equipment <span class="person-count">${equipment.length}</span></h3><p>Assigned to this person right now.</p></header><div>${equipment.map(device => `<div class="person-equipment"><span class="device-icon" aria-hidden="true">${portrait(device)}</span><div><button type="button" class="row-name" data-device="${device.id}" aria-controls="detail" aria-expanded="${selected === device.id}">${esc(device.name)}</button><small>${esc(device.device_type)} · #${device.id}</small><small>${esc(device.asset_tag || device.serial_number || 'No identifiers recorded')}</small></div>${conditionBadge(device)}</div>`).join('') || '<p class="person-empty">No equipment currently assigned.</p>'}</div></section>
+      <section class="person-card"><header><h3>Handover history</h3><p>Equipment received, released, and returned. Newest records first.</p></header>
+      <div class="person-filters" role="group" aria-label="Filter handovers">${[['all', 'All handovers'], ['received', 'Received'], ['released', 'Released']].map(([value, label]) => `<button type="button" data-handover-filter="${value}" aria-pressed="${handoverFilter === value}">${label}</button>`).join('')}</div>
+      <div class="person-timeline">${visible.slice(0, handoverLimit).map((event, index) => {
+        const movement = event.handover;
+        const incoming = received(event);
+        const label = incoming ? (movement.from ? 'Received' : 'Initial assignment') : movement.to.kind === 'unassigned' ? 'Returned' : 'Released';
+        const journey = state.activity.filter(item => item.device_id == event.device_id && item.handover);
+        return `<article id="person-event-${index}" tabindex="-1" class="person-event${incoming ? '' : ' outgoing'}"><div class="person-event-date"><span>${esc(date(event))}</span><span class="person-direction">${incoming ? '↙' : '↗'} ${label}</span></div><div class="person-transfer"><button type="button" class="row-name" data-device="${Number(event.device_id)}" aria-controls="detail">${esc(movement.device_name)} <span class="person-device-id">#${Number(event.device_id)}</span></button><div class="person-movement">${holderMarkup(movement.from)}<span class="person-arrow" aria-label="to">→</span>${holderMarkup(movement.to)}</div><small>Recorded ${esc(event.recorded_at)} · By ${esc(event.actor?.name || event.actor?.username || 'Not recorded')}</small>
+        ${journey.length > 1 ? `<details class="person-journey"><summary>Device journey · ${journey.length} records</summary><ol>${journey.map(item => `<li><small>${esc(date(item))}</small><span>${holderMarkup(item.handover.from)} <span aria-label="to">→</span> ${holderMarkup(item.handover.to)}</span></li>`).join('')}</ol></details>` : ''}</div></article>`;
+      }).join('') || `<p class="person-empty">${handovers.length ? 'No ' + handoverFilter + ' handovers recorded.' : 'No linked handovers recorded. Unlinked workbook names are not matched automatically.'}</p>`}</div>
+      ${visible.length > handoverLimit ? `<button type="button" class="person-more" id="person-more">Show more handovers (${visible.length - handoverLimit} remaining)</button>` : ''}</section></div>`;
   }
 
   function photoMarkup(event, photo, index, current = false) {
@@ -260,7 +333,7 @@
       ${device.source ? `<p class="source-hint">Imported from ${esc(device.source.sheet)} · row ${Number(device.source.row)}</p>` : ''}</div></div>
       <div class="detail-section"><h3>Evidence photos</h3><div id="device-photos" class="evidence-photos" aria-live="polite"><small>Loading photos…</small></div></div>
       <div class="detail-section history"><div class="drawer-section-heading"><h3>History</h3><button class="text-button" id="add-note">＋ Add note</button></div><div id="history" class="history-list" aria-live="polite"><small>Loading history…</small></div></div></div>
-      <footer class="drawer-actions"><button class="button" id="edit-device">Edit device</button><button class="button primary" id="assign-device">Assign / return ↗</button></footer>`;
+      <footer class="drawer-actions">${device.lifecycle_status === 'for_disposal' ? '<p>Permanently marked For disposal. Notes and evidence remain available.</p>' : '<button class="button" id="edit-device">Edit device</button><button class="button primary" id="assign-device">Assign / return ↗</button>'}</footer>`;
     try {
       const history = await request(`history&id=${id}`);
       if (historyRequest === generation && selected === id && $('#history')) {
@@ -282,6 +355,7 @@
     $('#dialog-fields').innerHTML = fields;
     $('#form-error').hidden = true;
     $('#save-dialog').disabled = false;
+    $('#save-dialog').textContent = 'Save';
     submitHandler = handler;
     $('#dialog').showModal();
   }
@@ -406,6 +480,7 @@
   }
 
   function editDevice(device = null, initialType = 'Laptop') {
+    if (device?.lifecycle_status === 'for_disposal') return;
     if (!canEdit) return;
     let pendingPhotos = () => [];
     const branchId = device ? device.location_branch_id : state.branches.find(branch => branch.name.toUpperCase() === 'APO')?.id;
@@ -488,9 +563,9 @@
 
   function assignDevice() {
     const device = chosen();
-    if (!device) return;
+    if (!device || device.lifecycle_status === 'for_disposal') return;
     openDialog('Assign / return equipment', device.name,
-      `<label>Assign to<select name="holder_kind" id="holder-kind"><option value="employee">HR employee</option><option value="associate">Inventory associate</option><option value="shared">Shared department</option><option value="unassigned">Return to unassigned pool</option></select></label>
+      `<label>Assign to<select name="holder_kind" id="holder-kind"><option value="employee">HR employee</option><option value="associate">Inventory associate</option><option value="shared">Shared department</option><option value="unassigned">Return to unassigned pool</option><option value="for_disposal">For disposal</option></select></label>
       <label id="associate-field" hidden>Associate<select name="associate_id"><option value="">Select an associate</option>${(state.associates || []).map(person => `<option value="${Number(person.id)}"${Number(person.id) === Number(device.associate_id) ? ' selected' : ''}>${esc(person.name)}</option>`).join('')}</select></label>
       <label id="employee-field">Employee<select name="hr_employee_id"><option value="">Select an employee</option>${state.employees.map(employee => `<option value="${Number(employee.id)}"${Number(employee.id) === device.hr_employee_id ? ' selected' : ''}>${esc(`${employee.name} · ${employee.employee_id} · ${employee.department}`)}</option>`).join('')}</select></label>
       <label id="department-field" hidden>Shared department<select name="department_id"><option value="">Select a department</option>${state.departments.map(department => `<option value="${Number(department.id)}"${Number(department.id) === device.department_id ? ' selected' : ''}>${esc(department.name)}</option>`).join('')}</select></label>
@@ -500,6 +575,7 @@
     const selector = $('#holder-kind');
     selector.value = ['shared', 'associate'].includes(device.holder_kind) ? device.holder_kind : 'employee';
     const updateFields = () => {
+      if (selector.value === 'for_disposal') { disposalDevice(device); return; }
       $('#employee-field').hidden = selector.value !== 'employee';
       $('#associate-field').hidden = selector.value !== 'associate';
       $('#associate-field select').required = selector.value === 'associate';
@@ -511,8 +587,34 @@
     updateFields();
   }
 
+  function disposalDevice(device) {
+    $('#dialog').close();
+    const rows = Object.entries(device.specifications || {}).filter(([, value]) => String(value).trim());
+    const today = new Date();
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    openDialog('Disposal & component recovery', device.name,
+      `<button type="button" class="button" id="disposal-back">Back to assignment</button>
+      <p>The original device will remain permanently For disposal. Select reusable physical hardware only. Existing peripheral records use the normal return flow. Leave all rows unchecked to recover nothing.</p>
+      <label>Disposal date<input type="date" name="disposal_date" value="${date}" required></label>
+      <label>Notes (optional)<textarea name="notes" maxlength="2000" rows="3"></textarea></label>
+      <fieldset class="recovery-rows"><legend>Components to recover as unassigned Other devices</legend>${rows.map(([name, value], index) => {
+        const label = `${name}: ${value}`;
+        const oversized = [...label.trim()].length > 255;
+        return `<label><input type="checkbox" data-recovery-index="${index}" ${oversized ? 'disabled' : ''}><span>${esc(label)}${oversized ? '<small>Unavailable: resulting name exceeds 255 characters.</small>' : ''}</span></label>`;
+      }).join('') || '<p>No populated specifications.</p>'}</fieldset>`, async form => {
+        const specification_names = [...$('#dialog-fields').querySelectorAll('[data-recovery-index]:checked')].map(input => rows[Number(input.dataset.recoveryIndex)][0]);
+        await request('disposal', 'POST', { ...form, id: device.id, version: device.version, specification_names });
+      });
+    const updateLabel = () => { $('#save-dialog').textContent = `Mark for disposal & recover ${$('#dialog-fields').querySelectorAll('[data-recovery-index]:checked').length} components`; };
+    $('.recovery-rows').addEventListener('change', updateLabel);
+    $('#disposal-back').onclick = () => { $('#dialog').close(); assignDevice(); };
+    updateLabel();
+    $('#disposal-back').focus();
+  }
+
   $('#dialog-form').addEventListener('submit', async event => {
     event.preventDefault();
+    if ($('#save-dialog').disabled) return;
     $('#save-dialog').disabled = true;
     $('#form-error').hidden = true;
     try {
@@ -529,6 +631,7 @@
   });
 
   function navigate(nextView) {
+    profileTrail = [];
     selected = null;
     view = nextView;
     employeeFilter = null;
@@ -555,8 +658,36 @@
       return;
     }
     if (target.dataset.view) navigate(target.dataset.view);
-    if (target.dataset.device) { selected = Number(target.dataset.device); render(); }
-    if (target.dataset.person) { navigate('devices'); employeeFilter = Number(target.dataset.person); render(); }
+    if (target.dataset.device) { selected = Number(target.dataset.device); render(); if (view === 'person') $('#close-detail').focus(); }
+    if (target.dataset.person) { openPerson(Number(target.dataset.person)); return; }
+    if (target.dataset.handoverFilter) {
+      handoverFilter = target.dataset.handoverFilter;
+      handoverLimit = 5;
+      renderPerson(devices());
+      observeThumbnails();
+      $('#person-overview').querySelectorAll('[data-handover-filter]').forEach(button => {
+        if (button.dataset.handoverFilter === handoverFilter) button.focus();
+      });
+      return;
+    }
+    if (target.id === 'person-more') {
+      const firstNew = handoverLimit;
+      handoverLimit += 10;
+      renderPerson(devices());
+      observeThumbnails();
+      $(`#person-event-${firstNew}`)?.focus();
+      return;
+    }
+    if (target.id === 'person-back') {
+      selected = null;
+      if (profileTrail.length) {
+        const previous = profileTrail.pop();
+        employeeFilter = previous.key; handoverFilter = previous.filter; handoverLimit = previous.limit;
+        render(); $('#person-heading').focus(); $('#person-overview').scrollTop = previous.scroll;
+      }
+      else { view = 'people'; employeeFilter = null; render(); $('#search').focus(); }
+      return;
+    }
     if (target.dataset.activityDevice) { navigate('devices'); selected = Number(target.dataset.activityDevice); render(); }
     if (target.id === 'refresh') reload();
     if (target.id === 'add-device') {

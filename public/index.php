@@ -29,10 +29,14 @@ if (!$user) {
   <link rel="stylesheet" href="assets/devices.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/devices.css'), 0, 12) ?>">
   <link rel="stylesheet" href="assets/navigation.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/navigation.css'), 0, 12) ?>">
   <link rel="stylesheet" href="assets/readability.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/readability.css'), 0, 12) ?>">
+  <link rel="stylesheet" href="assets/person.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/person.css'), 0, 12) ?>">
   <script src="assets/model.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/model.js'), 0, 12) ?>" defer></script>
   <script src="assets/photos.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photos.js'), 0, 12) ?>" defer></script>
   <script src="assets/photo-viewer.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photo-viewer.js'), 0, 12) ?>" defer></script>
   <script src="assets/app.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/app.js'), 0, 12) ?>" defer></script>
+  <link rel="stylesheet" href="assets/photo-import.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photo-import.css'), 0, 12) ?>">
+  <script src="assets/photo-import-model.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photo-import-model.js'), 0, 12) ?>" defer></script>
+  <script src="assets/photo-import.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/photo-import.js'), 0, 12) ?>" defer></script>
   <script src="assets/import.js?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/import.js'), 0, 12) ?>" defer></script>
 </head>
 <body data-role="<?= $user['role'] ?>">
@@ -51,20 +55,21 @@ if (!$user) {
     </div>
   </aside>
   <main>
-    <div class="page-content">
-      <div class="page-heading"><div><h1 id="page-title">Devices</h1><p id="page-description">Equipment and the people who hold it.</p></div><div class="action-row"><button class="button" id="refresh">Refresh</button><button class="button" id="import-excel">Import Excel</button><a class="button" href="api.php?action=export">Export Excel</a><button class="button primary" id="add-device" disabled>＋ Add device</button></div></div>
+    <div id="workspace-content" class="page-content">
+      <div class="page-heading"><div><h1 id="page-title">Devices</h1><p id="page-description">Equipment and the people who hold it.</p></div><div class="action-row"><button class="button" id="refresh">Refresh</button><button class="button" id="import-excel">Import Excel</button><button class="button" id="import-photos">Import photos</button><a class="button" href="api.php?action=export">Export Excel</a><button class="button primary" id="add-device" disabled>＋ Add device</button></div></div>
       <div id="notice" role="status" hidden></div>
       <div id="error" role="alert" hidden></div>
       <div id="stats" class="stats"></div>
       <div id="inventory-layout" class="inventory-layout">
-        <section class="inventory-panel" aria-label="Directory">
+        <section id="person-overview" aria-label="Person overview" hidden></section>
+        <section id="directory-panel" class="inventory-panel" aria-label="Directory">
           <div class="toolbar">
             <label class="search"><span aria-hidden="true">⌕</span><input id="search" aria-label="Search" placeholder="Search device, serial, asset tag, or holder…"></label>
             <select id="type-filter" class="button" aria-label="Device type"><option value="">All types</option></select>
             <select id="people-sort" class="button" aria-label="Sort employees by equipment" hidden><option value="name">Name A–Z</option><option value="zero-first">0 devices first</option><option value="has-first">Has devices first</option></select>
             <select id="department-filter" class="button" aria-label="Department"><option value="">All departments</option></select>
             <select id="branch-filter" class="button" aria-label="Branch"><option value="">All branches</option></select>
-            <select id="status-filter" class="button" aria-label="Assignment status"><option value="">All statuses</option><option value="assigned">Assigned</option><option value="available">Available</option></select>
+            <select id="status-filter" class="button" aria-label="Assignment status"><option value="">All statuses</option><option value="assigned">Assigned</option><option value="available">Available</option><option value="for_disposal">For disposal</option></select>
           </div>
           <div id="table-scroll" class="table-scroll"><table id="directory-table"><thead id="table-head"></thead><tbody id="table-body"><tr><td class="empty-state">Loading inventory…</td></tr></tbody></table><button type="button" id="activity-more" class="button" hidden>Load more changes</button></div>
           <div class="table-footer"><span id="table-footer"></span><button id="clear-person" class="text-button" hidden>Clear employee filter</button></div>
@@ -102,6 +107,23 @@ if (!$user) {
       <p id="import-error" role="alert" hidden></p>
     </div>
     <div class="modal-footer"><span id="import-status">Nothing is saved until approval.</span><div><button type="button" class="button" id="cancel-import">Cancel</button><button type="button" class="button primary" id="approve-import" disabled>Approve selected groups</button></div></div>
+  </form>
+</dialog>
+<dialog id="photo-import-dialog" class="modal import-modal" aria-labelledby="photo-import-title">
+  <form id="photo-import-form">
+    <div class="modal-header"><div><h2 id="photo-import-title">Import photos</h2><p>Review employee suggestions and choose the device for each photo.</p></div><button type="button" class="close-button" id="photo-import-close" aria-label="Close photo import">&#215;</button></div>
+    <div class="modal-body">
+      <label>Scanner results.json<input id="photo-import-manifest" type="file" accept=".json,application/json" required></label>
+      <label>Original photos<input id="photo-import-files" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+      <label>Or select the original Photos folder (includes subfolders)<input id="photo-import-folder" type="file" webkitdirectory multiple></label>
+      <p class="source-hint">Select the same folder used as the scanner input so relative paths match. Up to 2,000 records. Files must match the scanned originals. Photos are compressed locally and uploaded individually after approval. Names suggest matches only; assignments stay unchanged. No AI calls are made.</p>
+      <button type="submit" class="button" id="photo-import-preview">Preview photos</button>
+      <div class="action-row"><button type="button" class="text-button" id="photo-import-select">Select ready rows</button><button type="button" class="text-button" id="photo-import-clear">Clear selection</button></div>
+      <p class="source-hint">The strongest employee match at 60% or higher selects their single laptop and checks the photo automatically. Review before uploading. Tied names, missing laptops, and multiple laptops require a choice. Multiple photos can use the same laptop. Entries without an employee or target device are skipped; ready photos still upload.</p>
+      <datalist id="photo-import-employees"></datalist><div id="photo-import-rows"></div>
+      <p id="photo-import-error" role="alert" hidden></p>
+    </div>
+    <div class="modal-footer"><span id="photo-import-status" role="status" aria-live="polite">Nothing is uploaded until approval.</span><div><button type="button" class="button" id="photo-import-stop" hidden>Stop after current photo</button><button type="button" class="button" id="photo-import-cancel">Close</button><button type="button" class="button primary" id="photo-import-approve" disabled>Upload selected photos</button></div></div>
   </form>
 </dialog>
 </body>

@@ -14,7 +14,7 @@ try {
     $action = $_GET['action'] ?? 'state';
     $method = $_SERVER['REQUEST_METHOD'];
     $getActions = ['state', 'history', 'export', 'evidence'];
-    $postActions = ['preset', 'associate', 'device', 'assignment', 'note', 'photo-remove', 'import-preview', 'import-apply'];
+    $postActions = ['preset', 'associate', 'device', 'assignment', 'disposal', 'note', 'photo-remove', 'import-preview', 'import-apply', 'photo-import-preview', 'photo-import'];
     if (!is_string($action) || !in_array($action, [...$getActions, ...$postActions], true)) {
         throw new ValidationException('Endpoint not found.', 404);
     }
@@ -26,7 +26,7 @@ try {
     $user = Inventory\Auth::current();
     Inventory\Auth::authorize($user, $method === 'POST');
     $multipartDevice = $action === 'device' && str_starts_with(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data');
-    $input = $method === 'POST' && $action !== 'import-preview' && !$multipartDevice ? Http::input() : [];
+    $input = $method === 'POST' && !in_array($action, ['import-preview', 'photo-import'], true) && !$multipartDevice ? Http::input() : [];
     if ($multipartDevice) {
         Http::verifyToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '', $_SESSION['csrf'] ?? '');
         $payload = $_POST['device'] ?? null;
@@ -41,6 +41,35 @@ try {
     $creationPresets = $preset->read();
     $service = new InventoryService($db, $user, $creationPresets['device_types'], $creationPresets['presets']);
     $hr = new HrDirectory($db);
+    if ($action === 'photo-import-preview') {
+        unset($_SESSION['photo_import']);
+        $preview = Inventory\PhotoImport::create($input, $service->devices(), $hr->all());
+        $_SESSION['photo_import'] = $preview;
+        Http::json(['data' => $preview]);
+    }
+    if ($action === 'photo-import') {
+        Http::verifyToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '', $_SESSION['csrf'] ?? '');
+        $raw = $_POST['selection'] ?? null;
+        if (!is_string($raw) || strlen($raw) > 4096) throw new ValidationException('Missing photo selection. Check PHP post_max_size.', 413);
+        try { $selection = json_decode($raw, true, 16, JSON_THROW_ON_ERROR); }
+        catch (JsonException) { throw new ValidationException('Invalid photo selection.'); }
+        if (!is_array($selection) || !str_starts_with(ltrim($raw), '{')) throw new ValidationException('Send a photo selection object.');
+        if (!isset($_SESSION['photo_import'])) throw new ValidationException('Preview photos first.', 409);
+        $target = Inventory\PhotoImport::selection($_SESSION['photo_import'], $selection);
+        $photos = Inventory\EvidencePhotos::receive($_FILES['photos'] ?? null);
+        try {
+            if (count($photos) !== 1) throw new ValidationException('Upload exactly one photo per request.');
+            $photos[0]['sha256'] = hash_file('sha256', Inventory\EvidencePhotos::directory() . '/' . $photos[0]['file']);
+            $saved = $service->importPhoto($target['id'], $target['version'], $photos[0], $target['row']);
+        } catch (Throwable $error) { Inventory\EvidencePhotos::discard($photos); throw $error; }
+        if ($saved['skipped']) Inventory\EvidencePhotos::discard($photos);
+        // Advance only this preview's expected version, including safe retries.
+        foreach ($_SESSION['photo_import']['devices'] as &$device) {
+            if (!$saved['skipped'] && $device['id'] === $target['id']) $device['version'] = $saved['device']['version'];
+        }
+        unset($device);
+        Http::json(['data' => ['skipped' => $saved['skipped']]]);
+    }
     if ($action === 'evidence') {
         $eventId = InventoryService::positiveInt($_GET['event'] ?? null, 'event ID');
         $index = filter_var($_GET['photo'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
@@ -127,6 +156,7 @@ try {
         'associate' => (new Inventory\Associates($db))->add($input),
         'history' => $service->history(InventoryService::positiveInt($_GET['id'] ?? null, 'device ID')),
         'assignment' => $service->assign($input, $hr),
+        'disposal' => $service->disposal($input),
         'photo-remove' => $service->removePhoto($input),
         'note' => (static function () use ($service, $input): array { $service->note($input); return ['saved' => true]; })(),
     };

@@ -11,6 +11,9 @@ try {
     }
     // Upgrade existing inventory tables without touching HR or replacing devices.
     $columns = $db->query('SHOW COLUMNS FROM inv_devices')->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('lifecycle_status', $columns, true)) {
+        $db->exec("ALTER TABLE inv_devices ADD COLUMN lifecycle_status VARCHAR(20) NOT NULL DEFAULT 'active'");
+    }
     if (!in_array('associate_id', $columns, true)) {
         $db->exec('ALTER TABLE inv_devices ADD COLUMN associate_id BIGINT UNSIGNED NULL AFTER hr_employee_id');
     }

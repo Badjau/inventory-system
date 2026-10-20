@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS inv_devices (
     serial_number VARCHAR(255) NULL,
     asset_tag VARCHAR(255) NULL,
     device_condition VARCHAR(30) NOT NULL DEFAULT 'Unknown',
+    lifecycle_status VARCHAR(20) NOT NULL DEFAULT 'active',
     location VARCHAR(255) NULL,
     location_branch_id BIGINT UNSIGNED NULL,
     holder_kind VARCHAR(20) NOT NULL DEFAULT 'unassigned',

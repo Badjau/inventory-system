@@ -4,7 +4,7 @@
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[char]);
-  const attention = device => ['Needs attention', 'Faulty'].includes(device.device_condition);
+  const attention = device => device.lifecycle_status === 'for_disposal' || ['Needs attention', 'Faulty'].includes(device.device_condition);
   const displayDevice = (device, employees, branches = []) => {
     const locationBranch = branches.find(branch => Number(branch.id) === Number(device.location_branch_id));
     device = { ...device, location: locationBranch?.name || device.location };
@@ -14,8 +14,14 @@
     return person ? { ...device, holder_name: person.name, department: person.department, department_id: Number(person.department_id) || null,
       branch: person.branch, job_title: person.job_title, employee_missing: false } : { ...device, employee_missing: true };
   };
-  function filterDevices(devices, filter) {
+  function filterDevices(devices, filter, history = []) {
     const query = (filter.query || '').trim().toLocaleLowerCase();
+    const historicalMatches = new Set();
+    if (query) for (const event of history) {
+      if ((event.holder_names || []).some(name => name.toLocaleLowerCase().includes(query))) {
+        historicalMatches.add(Number(event.device_id));
+      }
+    }
     const normalizeSpec = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
     const colon = query.indexOf(':');
     const specName = colon > 0 ? normalizeSpec(query.slice(0, colon)) : '';
@@ -27,7 +33,7 @@
         device.holder_name, device.department, device.branch, device.job_title].join(' ').toLocaleLowerCase();
       const matchesQuery = !query || (specSearch
         ? Object.entries(device.specifications || {}).some(([name, value]) => normalizeSpec(name) === specName && normalizeSpec(value) !== '' && normalizeSpec(value).includes(specValue))
-        : text.includes(query));
+        : text.includes(query) || historicalMatches.has(Number(device.id)));
       return matchesQuery && (!filter.type || device.device_type === filter.type) &&
         (!filter.department || device.department === filter.department) &&
         (!filter.branch || device.branch === filter.branch) &&
@@ -36,8 +42,9 @@
           : device.holder_kind === 'employee' && Number(device.hr_employee_id) === Number(filter.employee))) &&
         (filter.view !== 'shared' || device.holder_kind === 'shared') &&
         (filter.view !== 'attention' || attention(device)) &&
-        (!filter.status || (filter.status === 'available' ? device.holder_kind === 'unassigned' :
-          filter.status === 'imported' ? device.holder_kind === 'imported' : device.holder_kind !== 'unassigned'));
+        (!filter.status || (filter.status === 'for_disposal' ? device.lifecycle_status === 'for_disposal' :
+          device.lifecycle_status !== 'for_disposal' && (filter.status === 'available' ? device.holder_kind === 'unassigned' :
+          filter.status === 'imported' ? device.holder_kind === 'imported' : device.holder_kind !== 'unassigned')));
     });
   }
   function importGroups(groups, choices) {

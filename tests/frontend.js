@@ -4,6 +4,16 @@ const { escape, attention, displayDevice, filterDevices, importGroups } = requir
 assert.equal(escape('<script>"&\''), '&lt;script&gt;&quot;&amp;&#39;');
 assert.equal(attention({ device_condition: 'Unknown' }), false);
 assert.equal(attention({ device_condition: 'Faulty' }), true);
+const disposalRow = { lifecycle_status: 'for_disposal', holder_kind: 'unassigned', device_condition: 'Faulty' };
+assert.equal(attention(disposalRow), true);
+assert.equal(attention({ ...disposalRow, device_condition: 'Good' }), true);
+assert.equal(attention({ ...disposalRow, device_condition: 'Unknown' }), true);
+assert.equal(filterDevices([disposalRow], { view: 'attention' }).length, 1);
+assert.equal(filterDevices([{ ...disposalRow, device_condition: 'Good' }], { view: 'attention' }).length, 1);
+assert.equal(filterDevices([disposalRow], { status: 'available' }).length, 0);
+assert.equal(filterDevices([disposalRow], { status: 'assigned' }).length, 0);
+assert.equal(filterDevices([disposalRow], { status: 'for_disposal' }).length, 1);
+assert.equal(filterDevices([disposalRow], {}).length, 1);
 const employee = { id: 10, name: 'New name', department: 'Sales', branch: 'Main', job_title: 'Manager' };
 const current = displayDevice({ id: 1, name: 'Acer', device_type: 'Laptop', holder_kind: 'employee', hr_employee_id: 10,
   holder_name: 'Previous name', department: 'Old department', device_condition: 'Good' }, [employee]);
@@ -32,6 +42,12 @@ assert.equal(filterDevices(specRows, { query: 'RAM: 16GB', branch: 'Other' }).le
 assert.equal(filterDevices(specRows, { query: '38:D5:47' })[0].id, 22);
 assert.equal(filterDevices(specRows, { query: 'Acer' }).length, 4);
 console.log('PASS: frontend escaping, HR display, and inventory filters.');
+const holderHistory = [{ device_id: '1', holder_names: ['Former Holder'] },
+  { device_id: 99, holder_names: ['Other Person'] }, { device_id: 1 }];
+assert.equal(filterDevices([current, { id: 99 }], { query: 'FORMER hold' }, holderHistory)[0].id, 1);
+assert.equal(filterDevices([current, { id: 99 }], { query: 'FORMER hold' }, holderHistory).length, 1);
+assert.equal(filterDevices([current], { query: 'Former', branch: 'Other' }, holderHistory).length, 0);
+assert.equal(filterDevices(specRows, { query: 'RAM: 32GB' }, [{ device_id: 20, holder_names: ['RAM: 32GB'] }]).length, 0);
 const reviewGroups = [{ id: 1, label: 'First name', records: [{ name: 'Desktop' }], conflict: false },
   { id: 2, label: 'Second name', records: [{ name: 'Laptop' }], conflict: false }];
 const reviewChoices = { 1: { employeeId: 10, selected: true, resolved: true }, 2: { employeeId: 10, selected: true, resolved: true } };
@@ -64,7 +80,7 @@ async function startupSmoke(role = 'editor') {
     for (const match of markup.matchAll(/id="([^"]+)"/g)) {
       if (elements.has(match[1])) continue;
       elements.set(match[1], { textContent: '', value: '', hidden: false, disabled: false, files: [],
-        showModal() { this.open = true; }, close() { this.open = false; },
+        showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; },
         classList: { toggle() {} }, querySelectorAll(selector) {
           if (selector === '[data-spec-row]') return [...this.innerHTML.matchAll(/<div class="spec-edit-row[^>]*data-spec-row([^>]*)>([\s\S]*?)<\/div>/g)].map(match => {
             const name = match[2].match(/<input maxlength="100" value="([^"]*)" required>/)?.[1] || '';
@@ -111,9 +127,9 @@ async function startupSmoke(role = 'editor') {
     { id: 9, message: 'Uploaded photos', actor: { name: '<Admin>', username: 'audit-user' }, photos: [{ name: 'Removed.jpg' }, { name: 'Kept.jpg' }], removed_photo_indexes: [0] }
   ] : []) :
     { desktop_preset: { version: 0, device_types: ['Laptop', 'Desktop', 'Monitor', 'Printer', 'Keyboard', 'Mouse', 'Other', 'Router'], presets: { Router: [{ name: 'Managed', value: 'yes' }, { name: 'Wireless', value: 'no' }, { name: 'Ports', value: '8' }] }, fields: [{ name: 'MAC ADDRESS', value: '' }, { name: 'Custom <spec>', value: '<default>' }] }, devices, employees: [], associates: [{ id: 10, name: '<Associate>', job_title: 'Partner' }], departments: [], branches: [], activity: [
-      { device_id: 1, message: 'Device edited', actor: { id: 1, name: '<Admin>', username: 'audit-user' } },
-      { device_id: 2, message: 'Legacy edit', actor: null },
-      ...Array.from({ length: 105 }, (_, index) => ({ device_id: 2, message: 'Older change ' + index, actor: null }))
+      { device_id: 1, message: 'Device edited', actor: { id: 1, name: '<Admin>', username: 'audit-user' }, handover: { from: { kind: 'employee', id: 10, name: '<Former employee>' }, to: { kind: 'associate', id: 10, name: '<Associate>' }, device_name: '<Transferred laptop>' } },
+      { device_id: 2, message: 'Legacy edit', actor: null, handover: { from: { kind: 'associate', id: 10, name: '<Associate>' }, to: { kind: 'unassigned', id: null, name: 'Available pool' }, device_name: 'Returned mouse' } },
+      ...Array.from({ length: 105 }, (_, index) => ({ device_id: 2, message: 'Older change ' + index, actor: null, ...(index < 5 ? { handover: { from: null, to: { kind: 'associate', id: 10, name: '<Associate>' }, device_name: 'Initial equipment ' + index } } : {}) }))
     ] } }) });
   new Function('document', 'InventoryModel', 'fetch', 'IntersectionObserver', 'InventoryPhotos', 'requestAnimationFrame', app)(document, require('../public/assets/model.js'), fetch, TestObserver, { attach: () => () => [] }, callback => callback());
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -166,13 +182,33 @@ async function startupSmoke(role = 'editor') {
   listeners['document:click']({ target: { closest: () => ({ dataset: { person: '-10' } }) } });
   assert.equal(elements.get('add-device').textContent, '＋ Add device');
   assert.equal(elements.get('table-body').innerHTML.includes('Recorded holder laptop'), false);
-  console.log('PASS: app startup, removed Holder Review, and summary card views.');
+  assert.equal(elements.get('person-overview').hidden, false);
+  assert.equal(elements.get('directory-panel').hidden, true);
+  assert.equal(elements.get('stats').hidden, true);
+  assert.equal(elements.get('person-overview').innerHTML.includes('&lt;Transferred laptop&gt;'), true);
+  assert.equal(elements.get('person-overview').innerHTML.includes('data-person="10"'), true);
+  assert.equal(elements.get('person-overview').innerHTML.includes('person-more'), true);
+  listeners['document:click']({ target: { closest: () => ({ dataset: { handoverFilter: 'released' } }) } });
+  assert.equal(elements.get('person-overview').innerHTML.includes('Returned mouse'), true);
+  assert.equal(elements.get('person-overview').innerHTML.includes('&lt;Transferred laptop&gt;'), false);
+  listeners['document:click']({ target: { closest: () => ({ dataset: { person: '10' } }) } });
+  assert.equal(elements.get('person-overview').innerHTML.includes('No longer in the directory'), true);
+  assert.equal(elements.get('person-overview').innerHTML.includes('Back to &lt;Associate&gt;'), true);
+  listeners['document:click']({ target: { closest: () => ({ id: 'person-back', dataset: {} }) } });
+  assert.equal(elements.get('person-overview').innerHTML.includes('Returned mouse'), true);
+  assert.equal(elements.get('person-overview').innerHTML.includes('&lt;Transferred laptop&gt;'), false);
+  listeners['document:click']({ target: { closest: () => ({ id: 'person-back', dataset: {} }) } });
+  assert.equal(elements.get('person-overview').hidden, true);
+  assert.equal(elements.get('directory-panel').hidden, false);
+  console.log('PASS: app startup, person history navigation, and summary card views.');
   assert.equal(page.includes('data-view="preset"'), false);
   assert.equal(elements.get('type-filter').innerHTML.endsWith('<option value="Other">Other</option>'), true);
   if (role !== 'viewer') {
     listeners['document:click']({ target: { closest: () => ({ dataset: { view: 'devices' } }) } });
     listeners['document:click']({ target: { closest: () => ({ id: 'add-device', dataset: {} }) } });
     assert.equal(elements.get('dialog-fields').innerHTML.includes('id="manage-preset"'), true);
+    assert.equal(elements.get('dialog-fields').innerHTML.includes('device-type-heading'), true);
+    assert.equal(elements.get('dialog-fields').innerHTML.includes('Create device type...</option><option value="Other"'), true);
     deviceTypeSelector.value = 'Desktop';
     listeners['device-type:change']();
     assert.equal(elements.get('spec-editor').querySelectorAll('[data-spec-row]').length, 2);
@@ -188,6 +224,14 @@ async function startupSmoke(role = 'editor') {
     assert.equal(elements.get('preset-dialog').open, false);
     assert.equal(elements.get('dialog').open, true);
     assert.equal(elements.get('spec-editor').innerHTML, deviceDraft);
+    deviceTypeSelector.value = '__inventory_create_device_type_action__';
+    listeners['device-type:change']();
+    assert.equal(deviceTypeSelector.value, 'Desktop');
+    assert.equal(elements.get('preset-dialog').open, true);
+    assert.equal(elements.get('preset-panel').innerHTML.includes('id="create-type-form"><label>'), true);
+    assert.equal(elements.get('preset-panel').innerHTML.includes('<summary>'), false);
+    assert.equal(elements.get('spec-editor').innerHTML, deviceDraft);
+    listeners['document:click']({ target: { closest: () => ({ id: 'close-preset', dataset: {} }) } });
     assert.equal(elements.get('dialog-fields').innerHTML.includes('Router'), true);
     deviceTypeSelector.value = 'Laptop';
     listeners['device-type:change']();
