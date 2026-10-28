@@ -71,6 +71,11 @@ try {
     $db->exec("INSERT INTO branches VALUES (1, 'Primary branch'), (2, 'Other branch'), (3, 'APO');");
     $db->exec('INSERT INTO branch_employee VALUES (1, 1, 2, 0), (2, 1, 1, 1);');
 
+    if (in_array('--bulk-only', $argv, true)) {
+        require __DIR__ . '/bulk.php';
+        bulkTests($db, new HrDirectory($db), $mysql);
+        echo "PASS: $assertions bulk assertions (" . ($mysql ? 'MySQL' : 'isolated SQLite fixture') . ").\n";
+    } else {
     // Fixed baseline for count/history regressions; the working workbook is editable.
     $workbookPath = dirname(__DIR__) . '/INVENTORY 2026.xlsx.before-department-cleanup.2.xlsx';
     $records = Workbook::records($workbookPath);
@@ -409,7 +414,10 @@ try {
     require __DIR__ . '/handovers.php';
     require __DIR__ . '/presets.php';
     require __DIR__ . '/disposal.php';
+    require __DIR__ . '/bulk.php';
+    bulkTests($db, $hr, $mysql);
     echo "PASS: $assertions assertions (" . ($mysql ? 'MySQL' : 'isolated SQLite fixture') . ").\n";
+    }
 } catch (Throwable $error) {
     fwrite(STDERR, 'FAIL: ' . $error->getMessage() . PHP_EOL . $error->getTraceAsString() . PHP_EOL);
     $exitCode = 1;

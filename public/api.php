@@ -14,7 +14,7 @@ try {
     $action = $_GET['action'] ?? 'state';
     $method = $_SERVER['REQUEST_METHOD'];
     $getActions = ['state', 'history', 'export', 'evidence'];
-    $postActions = ['preset', 'associate', 'device', 'assignment', 'disposal', 'note', 'photo-remove', 'import-preview', 'import-apply', 'photo-import-preview', 'photo-import'];
+    $postActions = ['bulk-preview', 'bulk-apply', 'preset', 'associate', 'device', 'assignment', 'disposal', 'note', 'photo-remove', 'import-preview', 'import-apply', 'photo-import-preview', 'photo-import'];
     if (!is_string($action) || !in_array($action, [...$getActions, ...$postActions], true)) {
         throw new ValidationException('Endpoint not found.', 404);
     }
@@ -41,6 +41,17 @@ try {
     $creationPresets = $preset->read();
     $service = new InventoryService($db, $user, $creationPresets['device_types'], $creationPresets['presets']);
     $hr = new HrDirectory($db);
+    if ($action === 'bulk-preview') {
+        unset($_SESSION['bulk_preview']);
+        $_SESSION['bulk_preview'] = Inventory\BulkPreview::create($service->previewBulk($input, $hr));
+        Http::json(['data' => Inventory\BulkPreview::display($_SESSION['bulk_preview'])]);
+    }
+    if ($action === 'bulk-apply') {
+        $plan = Inventory\BulkPreview::approved($_SESSION['bulk_preview'] ?? null, $input);
+        $result = $service->applyBulk($plan, $hr);
+        unset($_SESSION['bulk_preview']);
+        Http::json(['data' => $result]);
+    }
     if ($action === 'photo-import-preview') {
         unset($_SESSION['photo_import']);
         $preview = Inventory\PhotoImport::create($input, $service->devices(), $hr->all());
@@ -162,7 +173,7 @@ try {
     };
     Http::json(['data' => $data]);
 } catch (ValidationException $error) {
-    Http::json(['error' => $error->getMessage()], $error->status);
+    Http::json(['error' => $error->getMessage(), ...($error->conflicts ? ['conflicts' => $error->conflicts] : [])], $error->status);
 } catch (Throwable $error) {
     error_log('Inventory: ' . $error->getMessage());
     Http::json(['error' => 'Inventory is unavailable. Check the MySQL connection and complete the setup/import commands in README.md.'], 503);

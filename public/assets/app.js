@@ -8,6 +8,8 @@
   const titles = { devices: 'Devices', people: 'People', shared: 'Shared devices', attention: 'Needs attention', activity: 'Activity' };
   let state = { devices: [], employees: [], branches: [], departments: [], activity: [] };
   let view = 'devices', selected = null, employeeFilter = null, submitHandler = null, loading = false;
+  const bulkSelection = new Set();
+  let bulkVisible = [], bulkDraft = null, bulkApproval = null, bulkBusy = false, bulkNeedsRefresh = false, bulkOpener = null;
   const createTypeAction = '__inventory_create_device_type_action__';
   let selectCreatedType = false;
   let presetType = '';
@@ -72,7 +74,12 @@
     }
     let result;
     try { result = await response.json(); } catch { throw new Error('The server did not return JSON. Check the Laragon document root and PHP setup.'); }
-    if (!response.ok) throw new Error(result.error || `Request failed (${response.status}).`);
+    if (!response.ok) {
+      const error = new Error(result.error || `Request failed (${response.status}).`);
+      error.status = response.status;
+      error.conflicts = result.conflicts || [];
+      throw error;
+    }
     return result.data;
   }
 
@@ -86,6 +93,7 @@
     showError('');
     try {
       state = await request('state');
+      for (const id of bulkSelection) if (!state.devices.some(device => device.id === id && device.lifecycle_status !== 'for_disposal')) bulkSelection.delete(id);
       types = otherLast(state.desktop_preset?.device_types || types);
       const currentType = $('#type-filter').value;
       $('#type-filter').innerHTML = '<option value="">All types</option>' + options(types);
@@ -126,6 +134,8 @@
   }
 
   function render() {
+    if (view !== 'devices') bulkSelection.clear();
+    $('#bulk-bar').hidden = true;
     thumbnailObserver?.disconnect();
     activityObserver?.disconnect();
     activityObserver = null;
@@ -171,16 +181,280 @@
     if (view === 'activity') { renderActivity(); return; }
     const visible = filterDevices(rows, { query: $('#search').value, type: $('#type-filter').value,
       department: $('#department-filter').value, branch: $('#branch-filter').value, status: $('#status-filter').value, employee: employeeFilter, view }, state.activity);
-    $('#table-head').innerHTML = '<tr><th>Device</th><th>Serial / asset tag</th><th>Assigned to</th><th>Status</th><th>Condition</th></tr>';
+    const bulkEnabled = canEdit && view === 'devices';
+    $('#directory-table').classList.toggle('bulk-table', bulkEnabled);
+    bulkVisible = bulkEnabled ? visible.filter(device => device.lifecycle_status !== 'for_disposal') : [];
+    $('#table-head').innerHTML = '<tr>' + (bulkEnabled ? '<th class="bulk-check"><input type="checkbox" id="bulk-all" aria-label="Select all filtered active devices"></th>' : '') + '<th>Device</th><th>Serial / asset tag</th><th>Assigned to</th><th>Status</th><th>Condition</th></tr>';
     $('#table-body').innerHTML = visible.map(device => `<tr class="device-row ${device.id === selected ? 'selected-row' : ''}" data-device="${device.id}">
+      ${bulkEnabled ? `<td class="bulk-check"><input type="checkbox" data-bulk-device="${device.id}" aria-label="Select ${esc(device.name)} #${device.id}" ${bulkSelection.has(device.id) ? 'checked' : ''} ${device.lifecycle_status === 'for_disposal' ? 'disabled title="Devices marked for disposal cannot be edited"' : ''}></td>` : ''}
       <td><div class="device-cell"><span class="device-icon" aria-hidden="true">${portrait(device)}</span><div><button class="row-name" data-device="${device.id}" aria-controls="detail" aria-expanded="${device.id === selected}">${esc(device.name)}</button><small>${esc(device.device_type)} · #${device.id}</small></div></div></td>
       <td class="serial">${esc(device.serial_number || 'No serial recorded')}<small>${esc(device.asset_tag || 'No asset tag recorded')}</small></td>
       <td>${esc(device.holder_kind === 'shared' ? 'Shared department' : device.holder_name || 'Unassigned')}<small>${esc(device.department)}</small></td>
       <td>${badge(device)}</td><td>${conditionBadge(device)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">No devices match your filters.</td></tr>';
     $('#table-footer').textContent = `Showing ${visible.length} of ${rows.length} devices`;
+    updateBulkSelection();
+    if (bulkEnabled && !visible.length) $('#table-body').innerHTML = '<tr><td colspan="6" class="empty-state">No devices match your filters.</td></tr>';
     renderDetail();
     observeThumbnails();
   }
+
+  function updateBulkSelection() {
+    const enabled = canEdit && view === 'devices';
+    const visibleSelected = bulkVisible.filter(device => bulkSelection.has(device.id)).length;
+    $('#bulk-bar').hidden = !enabled || !bulkSelection.size;
+    $('#bulk-count').textContent = `${bulkSelection.size} selected` + (bulkSelection.size > visibleSelected ? ` · ${bulkSelection.size - visibleSelected} hidden by filters` : '');
+    const all = $('#bulk-all');
+    if (all) {
+      all.checked = bulkVisible.length > 0 && visibleSelected === bulkVisible.length;
+      all.indeterminate = visibleSelected > 0 && visibleSelected < bulkVisible.length;
+      all.disabled = !bulkVisible.length;
+    }
+    $('#table-body').querySelectorAll('[data-bulk-device]').forEach(input => {
+      input.checked = bulkSelection.has(Number(input.dataset.bulkDevice));
+      input.closest('tr').classList.toggle('bulk-selected', input.checked);
+    });
+  }
+
+  function bulkError(message) {
+    $('#bulk-error').textContent = message;
+    $('#bulk-error').hidden = !message;
+  }
+
+  function bulkTargetSummary() {
+    $('#bulk-targets').textContent = `${bulkDraft.devices.length} devices selected · ${bulkDraft.hidden} hidden by filters. All selected devices are included.`;
+  }
+
+  function bulkDirectoryChoices() {
+    for (const [id, rows, label] of [
+      ['bulk-employee', state.employees, person => `${person.name} · ${person.employee_id}`],
+      ['bulk-associate', state.associates || [], person => person.name],
+      ['bulk-department', state.departments, department => department.name]
+    ]) {
+      const select = $('#' + id);
+      if (!select) continue;
+      const previous = select.value;
+      select.innerHTML = '<option value="">Select a target</option>' + rows.map(row => `<option value="${row.id}">${esc(label(row))}</option>`).join('');
+      select.value = previous;
+    }
+  }
+
+  function openBulk(mode, opener) {
+    if (!canEdit || !bulkSelection.size) return;
+    bulkOpener = opener;
+    bulkApproval = null;
+    bulkNeedsRefresh = false;
+    bulkDraft = { mode, devices: state.devices.filter(device => bulkSelection.has(device.id)).map(device => ({ id: device.id, version: device.version })),
+      hidden: bulkSelection.size - bulkVisible.filter(device => bulkSelection.has(device.id)).length };
+    const targets = state.devices.filter(device => bulkSelection.has(device.id));
+    const common = key => targets.every(device => device[key] === targets[0][key]) ? targets[0][key] : null;
+    $('#bulk-title').textContent = mode === 'details' ? 'Edit selected devices' : 'Assign / return selected devices';
+    bulkTargetSummary();
+    const targetList = `<details><summary>View selected devices</summary><ul>${targets.map(device => `<li>${esc(device.name)} · #${device.id} · ${esc(device.holder_kind === 'shared' ? device.department : device.holder_name || 'Available pool')}</li>`).join('')}</ul></details>`;
+    $('#bulk-draft').innerHTML = targetList + (mode === 'details' ? `
+      <fieldset><legend>Shared details</legend>
+      <label class="bulk-enable"><input type="checkbox" id="bulk-condition-on"> Apply condition change <small>Current: ${esc(common('device_condition') || 'Mixed')}</small></label>
+      <label>New condition<select id="bulk-condition" disabled>${options(conditions, common('device_condition') || 'Good')}</select></label>
+      <label class="bulk-enable"><input type="checkbox" id="bulk-location-on"> Apply location change <small>Current: ${esc(common('location') || (common('location_branch_id') ? 'Recorded branch' : 'Mixed / not recorded'))}</small></label>
+      <label>New location<select id="bulk-location" disabled><option value="">Clear location</option>${state.branches.map(branch => `<option value="${branch.id}"${branch.id === common('location_branch_id') ? ' selected' : ''}>${esc(branch.name)}</option>`).join('')}</select></label></fieldset>
+      <h3>Specifications</h3><p>Set adds missing specifications to every selected device. Other specifications stay as they are. Remove explicitly clears a specification.</p>
+      <datalist id="bulk-spec-names">${[...new Set(targets.flatMap(device => [...Object.keys(device.specifications || {}), ...(state.desktop_preset?.presets?.[device.device_type] || []).map(item => item.name)]))].map(name => `<option value="${esc(name)}"></option>`).join('')}</datalist>
+      <div id="bulk-specs"></div><button type="button" class="button" id="bulk-add-spec">Add specification</button>` : `
+      <p>All selected equipment will use this holder. Devices already assigned to someone else will be moved; review each change before applying.</p>
+      <label>Action<select id="bulk-kind" required><option value="">Choose assignment or return</option><option value="employee">Assign to HR employee</option><option value="associate">Assign to inventory associate</option><option value="shared">Assign to shared department</option><option value="unassigned">Return to available pool</option></select></label>
+      <label id="bulk-employee-field" hidden>Employee<select id="bulk-employee"></select></label>
+      <label id="bulk-associate-field" hidden>Associate<select id="bulk-associate"></select></label>
+      <label id="bulk-department-field" hidden>Shared department<select id="bulk-department"></select></label>
+      <label id="bulk-date-field">Handover date (optional)<input id="bulk-date" type="date"></label>
+      <label>Handover / return notes<textarea id="bulk-notes" maxlength="2000" rows="3"></textarea></label>`);
+    bulkDirectoryChoices();
+    $('#bulk-draft').hidden = false;
+    $('#bulk-review').hidden = true;
+    $('#bulk-back').hidden = true;
+    $('#bulk-refresh').hidden = true;
+    $('#bulk-submit').textContent = 'Review changes';
+    $('#bulk-submit').disabled = false;
+    $('#bulk-status').textContent = 'Nothing is saved until you apply.';
+    bulkError('');
+    $('#bulk-dialog').showModal();
+    $('#bulk-title').setAttribute('tabindex', '-1');
+    $('#bulk-title').focus();
+  }
+
+  function addBulkSpecification() {
+    if ($('#bulk-specs').querySelectorAll('[data-bulk-spec]').length >= 128) { bulkError('Use up to 128 specification operations.'); return; }
+    $('#bulk-specs').insertAdjacentHTML('beforeend', `<fieldset data-bulk-spec class="bulk-spec-row"><legend>Specification change</legend>
+      <label>Specification name<input data-bulk-name list="bulk-spec-names" maxlength="100" required></label>
+      <label>Action<select data-bulk-action><option value="set">Set</option><option value="remove">Remove</option></select></label>
+      <label data-bulk-value-label>Value<select data-bulk-value><option value="Yes">Yes</option><option value="No">No</option><option value="Other">Other</option></select></label>
+      <label data-bulk-custom-label hidden>Custom value<textarea data-bulk-custom maxlength="4000" disabled></textarea></label>
+      <button type="button" class="text-button" data-bulk-remove>Remove draft row</button></fieldset>`);
+    $('#bulk-specs').lastElementChild.querySelector('input').focus();
+  }
+
+  function bulkPayload() {
+    if (bulkDraft.mode === 'assignment') return { ...bulkDraft, assignment: {
+      holder_kind: $('#bulk-kind').value, hr_employee_id: $('#bulk-employee').value,
+      associate_id: $('#bulk-associate').value, department_id: $('#bulk-department').value,
+      handover_date: $('#bulk-date').value, notes: $('#bulk-notes').value
+    } };
+    const patch = {};
+    if ($('#bulk-condition-on').checked) patch.device_condition = $('#bulk-condition').value;
+    if ($('#bulk-location-on').checked) patch.location_branch_id = $('#bulk-location').value || null;
+    const specifications = [...$('#bulk-specs').querySelectorAll('[data-bulk-spec]')].map(row => {
+      const action = row.querySelector('[data-bulk-action]').value;
+      const choice = row.querySelector('[data-bulk-value]').value;
+      return { name: row.querySelector('[data-bulk-name]').value, action,
+        ...(action === 'set' ? { value: choice === 'Other' ? row.querySelector('[data-bulk-custom]').value : choice } : {}) };
+    });
+    return { ...bulkDraft, patch, specifications };
+  }
+
+  function showBulkReview(preview) {
+    bulkApproval = preview.token;
+    const totals = { addition: 0, change: 0, removal: 0 };
+    preview.rows.forEach(row => row.diffs.forEach(diff => totals[diff.kind]++));
+    const shownValue = value => value === null ? 'Not recorded / removed' : String(value);
+    const fieldChanges = new Map();
+    preview.rows.forEach(row => row.diffs.forEach(diff => {
+      const key = diff.field.toLocaleLowerCase().replace(/\s+/g, ' ').trim() + ':' + JSON.stringify(diff.after);
+      const group = fieldChanges.get(key) || { field: diff.field, value: diff.after, count: 0 };
+      group.count++;
+      fieldChanges.set(key, group);
+    }));
+    const holderGroups = new Map();
+    preview.rows.forEach(row => holderGroups.set(row.holder, (holderGroups.get(row.holder) || 0) + 1));
+    $('#bulk-review').innerHTML = `<h3>Review changes</h3><p>${preview.changed} devices will change · ${preview.unchanged} unchanged.</p>
+      <p>${totals.addition} additions · ${totals.change} changes · ${totals.removal} removals.</p>
+      <ul>${[...fieldChanges.values()].map(group => `<li><strong>${esc(group.field)}</strong> → ${esc(shownValue(group.value))}: ${group.count} will change · ${preview.rows.length - group.count} unchanged.</li>`).join('')}</ul>
+      ${bulkDraft.mode === 'assignment' ? `<p>Current holders: ${[...holderGroups].map(([name, count]) => `${esc(name)} (${count})`).join(', ')}.</p>` : ''}
+      ${preview.rows.map(row => `<details><summary>${esc(row.name)} · #${row.id} · ${row.diffs.length ? 'Changes' : 'Unchanged'}</summary><ul>${row.diffs.map(diff => `<li><strong>${esc(diff.field)}</strong>: ${esc(shownValue(diff.before))} → ${esc(shownValue(diff.after))}</li>`).join('') || '<li>No changes.</li>'}</ul></details>`).join('')}`;
+    $('#bulk-draft').hidden = true;
+    $('#bulk-review').hidden = false;
+    $('#bulk-back').hidden = false;
+    $('#bulk-submit').textContent = `Apply to ${preview.changed} devices`;
+    $('#bulk-submit').disabled = preview.changed === 0;
+    $('#bulk-title').textContent = 'Review selected device changes';
+    $('#bulk-title').focus();
+  }
+
+  function backToBulkDraft() {
+    bulkApproval = null;
+    $('#bulk-draft').hidden = false;
+    $('#bulk-review').hidden = true;
+    $('#bulk-back').hidden = true;
+    $('#bulk-submit').textContent = 'Review changes';
+    $('#bulk-submit').disabled = bulkNeedsRefresh;
+    $('#bulk-title').textContent = bulkDraft.mode === 'details' ? 'Edit selected devices' : 'Assign / return selected devices';
+    $('#bulk-title').focus();
+  }
+
+  $('#bulk-edit').addEventListener('click', event => openBulk('details', event.currentTarget));
+  $('#bulk-assign').addEventListener('click', event => openBulk('assignment', event.currentTarget));
+  $('#bulk-clear').addEventListener('click', () => { bulkSelection.clear(); updateBulkSelection(); });
+  $('#directory-table').addEventListener('change', event => {
+    if (event.target.id === 'bulk-all') bulkVisible.forEach(device => event.target.checked ? bulkSelection.add(device.id) : bulkSelection.delete(device.id));
+    else if (event.target.dataset.bulkDevice) {
+      const id = Number(event.target.dataset.bulkDevice);
+      if (bulkVisible.some(device => device.id === id)) event.target.checked ? bulkSelection.add(id) : bulkSelection.delete(id);
+    } else return;
+    updateBulkSelection();
+  });
+  $('#bulk-draft').addEventListener('click', event => {
+    if (event.target.closest('#bulk-add-spec')) addBulkSpecification();
+    if (event.target.closest('[data-bulk-remove]')) event.target.closest('[data-bulk-spec]').remove();
+  });
+  $('#bulk-draft').addEventListener('change', event => {
+    const target = event.target;
+    if (target.id === 'bulk-condition-on') $('#bulk-condition').disabled = !target.checked;
+    if (target.id === 'bulk-location-on') $('#bulk-location').disabled = !target.checked;
+    if (target.id === 'bulk-kind') {
+      for (const [kind, field] of [['employee', 'employee'], ['associate', 'associate'], ['shared', 'department']]) {
+        const active = target.value === kind;
+        $('#bulk-' + field + '-field').hidden = !active;
+        $('#bulk-' + field).disabled = !active;
+        $('#bulk-' + field).required = active;
+      }
+      $('#bulk-date-field').hidden = target.value === 'unassigned';
+      $('#bulk-date').disabled = target.value === 'unassigned';
+      if (target.value === 'unassigned') $('#bulk-date').value = '';
+    }
+    const row = target.closest('[data-bulk-spec]');
+    if (row) {
+      const removing = row.querySelector('[data-bulk-action]').value === 'remove';
+      const custom = !removing && row.querySelector('[data-bulk-value]').value === 'Other';
+      row.querySelector('[data-bulk-value-label]').hidden = removing;
+      row.querySelector('[data-bulk-value]').disabled = removing;
+      row.querySelector('[data-bulk-custom-label]').hidden = !custom;
+      row.querySelector('[data-bulk-custom]').disabled = !custom;
+      row.querySelector('[data-bulk-custom]').required = custom;
+    }
+  });
+  $('#bulk-back').addEventListener('click', () => { if (!bulkBusy) { backToBulkDraft(); bulkError(''); } });
+  for (const id of ['bulk-close', 'bulk-cancel']) $('#' + id).addEventListener('click', () => { if (!bulkBusy) $('#bulk-dialog').close(); });
+  $('#bulk-dialog').addEventListener('cancel', event => { if (bulkBusy) event.preventDefault(); });
+  $('#bulk-dialog').addEventListener('close', () => { bulkApproval = null; bulkOpener?.focus(); });
+  $('#bulk-refresh').addEventListener('click', async () => {
+    if (bulkBusy) return;
+    bulkBusy = true;
+    $('#bulk-refresh').disabled = true;
+    try {
+      const fresh = await request('state');
+      const targets = bulkDraft.devices.map(target => fresh.devices.find(device => device.id === target.id));
+      if (targets.some(device => !device || device.lifecycle_status === 'for_disposal')) throw new Error('A target is missing or marked for disposal. Close this editor and update your selection.');
+      state = fresh;
+      bulkDraft.devices = targets.map(device => ({ id: device.id, version: device.version }));
+      bulkNeedsRefresh = false;
+      bulkDirectoryChoices();
+      let refreshMessage = 'Targets refreshed. Review your proposed changes again.';
+      if ($('#bulk-location')) {
+        const location = $('#bulk-location').value;
+        $('#bulk-location').innerHTML = '<option value="">Clear location</option>' + state.branches.map(branch => `<option value="${branch.id}">${esc(branch.name)}</option>`).join('');
+        $('#bulk-location').value = location;
+        if (location && $('#bulk-location').value !== location) {
+          $('#bulk-location-on').checked = false;
+          $('#bulk-location').disabled = true;
+          refreshMessage = 'Targets refreshed. The selected location no longer exists; choose a location again before reviewing.';
+        }
+      }
+      backToBulkDraft();
+      bulkError(refreshMessage);
+      $('#bulk-refresh').hidden = true;
+      render();
+    } catch (error) { bulkError(error.message); }
+    finally { bulkBusy = false; $('#bulk-refresh').disabled = false; }
+  });
+  $('#bulk-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (bulkBusy || bulkNeedsRefresh || $('#bulk-submit').disabled) return;
+    bulkBusy = true;
+    $('#bulk-submit').disabled = true;
+    bulkError('');
+    const applying = Boolean(bulkApproval);
+    $('#bulk-status').textContent = applying ? 'Applying changes…' : 'Preparing review…';
+    try {
+      if (!applying) showBulkReview(await request('bulk-preview', 'POST', bulkPayload()));
+      else {
+        const result = await request('bulk-apply', 'POST', { token: bulkApproval });
+        bulkSelection.clear();
+        $('#bulk-dialog').close();
+        await reload();
+        $('#notice').innerHTML = `${result.changed} devices updated · ${result.unchanged} unchanged. <button type="button" class="text-button" data-view="activity">View Activity</button>`;
+        $('#notice').hidden = false;
+        $('#search').focus();
+      }
+    } catch (error) {
+      // An unconfirmed write must be reconciled before any retry.
+      bulkNeedsRefresh = applying || error.status === 409;
+      bulkApproval = null;
+      backToBulkDraft();
+      $('#bulk-refresh').hidden = !bulkNeedsRefresh;
+      bulkError(error.message + (bulkNeedsRefresh ? ' Refresh targets before reviewing again.' : ''));
+    } finally {
+      bulkBusy = false;
+      $('#bulk-submit').disabled = bulkNeedsRefresh || (!$('#bulk-review').hidden && $('#bulk-submit').textContent === 'Apply to 0 devices');
+      $('#bulk-status').textContent = bulkNeedsRefresh ? 'Refresh targets before continuing.' : 'Nothing is saved until you apply.';
+    }
+  });
 
   function renderPeople(rows) {
     const query = $('#search').value.toLocaleLowerCase().trim();
@@ -631,6 +905,7 @@
   });
 
   function navigate(nextView) {
+    if (nextView !== 'devices') bulkSelection.clear();
     profileTrail = [];
     selected = null;
     view = nextView;
@@ -645,6 +920,7 @@
   }
 
   document.addEventListener('click', event => {
+    if (event.target.dataset?.bulkDevice !== undefined || event.target.id === 'bulk-all') return;
     const target = event.target.closest('button, [data-device]');
     if (!target) return;
     if (target.dataset.removePhoto !== undefined) { removePhoto(target); return; }
@@ -733,7 +1009,7 @@
       $('#preset-dialog').close();
       return;
     }
-    if (event.key === 'Escape' && selected && !$('#preset-dialog').open && !$('#dialog').open && !$('#import-dialog').open && !$('#photo-viewer').open) {
+    if (event.key === 'Escape' && selected && !$('#bulk-dialog').open && !$('#preset-dialog').open && !$('#dialog').open && !$('#import-dialog').open && !$('#photo-viewer').open) {
       event.preventDefault();
       closeDetail();
     }

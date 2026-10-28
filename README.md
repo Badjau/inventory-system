@@ -61,6 +61,8 @@ Use **Import Excel** to upload a supported inventory workbook or an earlier expo
 
 Photos are stored separately from Excel exports. Back up the inventory database and `storage/`, including evidence photos and saved device presets.
 
+Select device checkboxes to edit condition, location, or several specifications together, or assign/return the selected equipment. Review the proposed changes before applying. Setting a specification such as Microsoft 365 to Yes also adds it to selected devices where it is missing; other specifications stay intact.
+
 ## Hosting
 
 Access is local only by default. For Laragon Apache, use the supplied [local configuration](deploy/laragon.inventory.conf) with `public/` as the document root. The [HTTPS configuration](deploy/laragon.inventory-https.conf) supports a local certificate trusted by your client devices.

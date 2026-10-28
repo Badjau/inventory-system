@@ -23,6 +23,7 @@ if (!$user) {
   <meta name="inventory-role" content="<?= $user['role'] ?>">
   <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8') ?>">
   <title>Inventory · MC Asia</title>
+  <link rel="stylesheet" href="assets/bulk.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/bulk.css'), 0, 12) ?>">
   <link rel="stylesheet" href="assets/base.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/base.css'), 0, 12) ?>">
   <link rel="stylesheet" href="assets/app.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/app.css'), 0, 12) ?>">
   <link rel="stylesheet" href="assets/stats.css?v=<?= substr(hash_file('sha256', __DIR__ . '/assets/stats.css'), 0, 12) ?>">
@@ -71,6 +72,7 @@ if (!$user) {
             <select id="branch-filter" class="button" aria-label="Branch"><option value="">All branches</option></select>
             <select id="status-filter" class="button" aria-label="Assignment status"><option value="">All statuses</option><option value="assigned">Assigned</option><option value="available">Available</option><option value="for_disposal">For disposal</option></select>
           </div>
+          <div id="bulk-bar" class="bulk-bar" hidden><span id="bulk-count" role="status" aria-live="polite"></span><div class="action-row"><button type="button" class="button" id="bulk-edit">Edit details</button><button type="button" class="button" id="bulk-assign">Assign / return</button><button type="button" class="text-button" id="bulk-clear">Clear selection</button></div></div>
           <div id="table-scroll" class="table-scroll"><table id="directory-table"><thead id="table-head"></thead><tbody id="table-body"><tr><td class="empty-state">Loading inventory…</td></tr></tbody></table><button type="button" id="activity-more" class="button" hidden>Load more changes</button></div>
           <div class="table-footer"><span id="table-footer"></span><button id="clear-person" class="text-button" hidden>Clear employee filter</button></div>
         </section>
@@ -79,6 +81,13 @@ if (!$user) {
     </div>
   </main>
 </div>
+<dialog id="bulk-dialog" class="modal import-modal" aria-labelledby="bulk-title">
+  <form id="bulk-form">
+    <div class="modal-header"><div><h2 id="bulk-title">Edit selected devices</h2><p id="bulk-targets"></p></div><button type="button" class="close-button" id="bulk-close" aria-label="Close bulk editor">×</button></div>
+    <div class="modal-body"><div id="bulk-draft"></div><div id="bulk-review" hidden></div><p id="bulk-error" class="bulk-error" role="alert" hidden></p></div>
+    <div class="modal-footer"><span id="bulk-status" role="status" aria-live="polite">Nothing is saved until you apply.</span><div class="action-row"><button type="button" class="button" id="bulk-cancel">Cancel</button><button type="button" class="button" id="bulk-back" hidden>Back</button><button type="button" class="button" id="bulk-refresh" hidden>Refresh targets</button><button type="submit" class="button primary" id="bulk-submit">Review changes</button></div></div>
+  </form>
+</dialog>
 <dialog id="dialog" class="modal">
   <form id="dialog-form">
     <div class="modal-header"><div><h2 id="dialog-title"></h2><p id="dialog-subtitle"></p></div><button type="button" class="close-button" id="close-dialog" aria-label="Close">×</button></div>

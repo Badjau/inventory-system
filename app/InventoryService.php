@@ -343,6 +343,21 @@ final class InventoryService
     {
         $id = self::positiveInt($input['id'] ?? null, 'device ID');
         $version = self::positiveInt($input['version'] ?? null, 'version');
+        [$values, $target, $date, $notes] = $this->assignmentValues($input, $hr);
+        $kind = $values['holder_kind'];
+        return $this->transaction(function () use ($id, $version, $kind, $values, $target, $date, $notes): array {
+            $before = $this->device($id);
+            $this->requireActive($before);
+            $previous = $before['holder_kind'] === 'shared' ? $before['department'] : ($before['holder_name'] ?? 'unassigned pool');
+            $this->update($id, $version, $values);
+            $this->event($id, $kind === 'unassigned' ? 'return' : 'assign',
+                "Holder changed from $previous to $target." . ($notes ? " $notes" : ''), $date, $before);
+            return $this->device($id);
+        });
+    }
+
+    private function assignmentValues(array $input, HrDirectory $hr): array
+    {
         $kind = self::text($input, 'holder_kind', true);
         $date = self::text($input, 'handover_date');
         if ($date !== null) self::validateDate($date);
@@ -375,14 +390,136 @@ final class InventoryService
         } else {
             throw new ValidationException('Choose an employee, a shared department, or the unassigned pool.');
         }
-        return $this->transaction(function () use ($id, $version, $kind, $values, $target, $date, $notes): array {
-            $before = $this->device($id);
-            $this->requireActive($before);
-            $previous = $before['holder_kind'] === 'shared' ? $before['department'] : ($before['holder_name'] ?? 'unassigned pool');
-            $this->update($id, $version, $values);
-            $this->event($id, $kind === 'unassigned' ? 'return' : 'assign',
-                "Holder changed from $previous to $target." . ($notes ? " $notes" : ''), $date, $before);
-            return $this->device($id);
+        return [$values, $target, $date, $notes];
+    }
+
+    /** Build a validated patch against every target; only this server plan is approved. */
+    public function previewBulk(array $input, HrDirectory $hr): array
+    {
+        $targets = $input['devices'] ?? null;
+        if (!is_array($targets) || !array_is_list($targets) || !$targets || count($targets) > 1000) {
+            throw new ValidationException('Select between 1 and 1,000 devices.');
+        }
+        $mode = $input['mode'] ?? null;
+        if (!in_array($mode, ['details', 'assignment'], true)) throw new ValidationException('Choose a bulk operation.');
+        $patch = $input['patch'] ?? [];
+        if (!is_array($patch) || array_diff(array_keys($patch), ['device_condition', 'location_branch_id'])) {
+            throw new ValidationException('Unsupported bulk detail field.');
+        }
+        $operations = $input['specifications'] ?? [];
+        if (!is_array($operations) || !array_is_list($operations) || count($operations) > 128) throw new ValidationException('Invalid specification operations.');
+        $names = [];
+        foreach ($operations as $operation) {
+            if (!is_array($operation)) throw new ValidationException('Invalid specification operation.');
+            $name = self::text($operation, 'name', true, 100);
+            $normalized = self::specificationName($name);
+            if (isset($names[$normalized])) throw new ValidationException('Repeated specification operation: ' . $name);
+            $names[$normalized] = true;
+            if (!in_array($operation['action'] ?? null, ['set', 'remove'], true)) throw new ValidationException('Choose Set or Remove.');
+            if ($operation['action'] === 'set') self::text($operation, 'value', true, 4000);
+        }
+        $assignment = null;
+        if ($mode === 'assignment') {
+            if ($patch || $operations || !is_array($input['assignment'] ?? null)) throw new ValidationException('Keep assignment separate from detail edits.');
+            $assignment = $this->assignmentValues($input['assignment'], $hr);
+        } elseif (!$patch && !$operations) throw new ValidationException('Choose at least one change.');
+        $rows = [];
+        $conflicts = [];
+        $seen = [];
+        foreach ($targets as $target) {
+            if (!is_array($target)) throw new ValidationException('Invalid bulk target.');
+            $id = self::positiveInt($target['id'] ?? null, 'device ID');
+            $version = self::positiveInt($target['version'] ?? null, 'version');
+            if (isset($seen[$id])) throw new ValidationException('Repeated device ID.');
+            $seen[$id] = true;
+            try { $before = $this->device($id); }
+            catch (ValidationException $error) { if ($error->status !== 404) throw $error; $conflicts[] = $id; continue; }
+            if ($before['version'] !== $version || $before['lifecycle_status'] !== 'active') { $conflicts[] = $id; continue; }
+            $diffs = [];
+            if ($assignment !== null) {
+                $values = $assignment[0];
+            } else {
+                $specs = $before['specifications'];
+                foreach ($operations as $operation) {
+                    $name = trim($operation['name']);
+                    $matches = array_values(array_filter(array_keys($specs), static fn ($key) => self::specificationName($key) === self::specificationName($name)));
+                    if (count($matches) > 1) throw new ValidationException('Device #' . $id . ' has ambiguous specification keys: ' . implode(', ', $matches));
+                    $key = $matches[0] ?? $name;
+                    $old = $specs[$key] ?? null;
+                    $new = $operation['action'] === 'remove' ? null : trim($operation['value']);
+                    if ($new === null) unset($specs[$key]); else $specs[$key] = $new;
+                    if ($old !== $new) $diffs[] = ['field' => 'Spec: ' . $key, 'before' => $old, 'after' => $new,
+                        'kind' => $old === null ? 'addition' : ($new === null ? 'removal' : 'change')];
+                }
+                $editableBefore = $before;
+                unset($editableBefore['location'], $editableBefore['location_branch_id']);
+                $validated = $this->editable([...$editableBefore, ...$patch, 'specifications' => $specs]);
+                $values = array_intersect_key($validated, $patch);
+                if (array_key_exists('location_branch_id', $patch)) $values['location'] = $validated['location'];
+                if ($operations) $values['specifications_json'] = $validated['specifications_json'];
+            }
+            $changes = [];
+            foreach ($values as $key => $value) {
+                $old = $key === 'specifications_json' ? json_encode($before['specifications'], JSON_THROW_ON_ERROR) : ($before[$key] ?? null);
+                if ($old === $value) continue;
+                $changes[$key] = $value;
+                $labels = ['device_condition' => 'Condition', 'location' => 'Location', 'handover_date' => 'Handover date',
+                    'department' => 'Department', 'branch' => 'Holder branch', 'job_title' => 'Job title'];
+                if (isset($labels[$key])) $diffs[] = ['field' => $labels[$key], 'before' => $old, 'after' => $value, 'kind' => 'change'];
+            }
+            if ($assignment !== null) {
+                $holderChanged = false;
+                foreach (['holder_kind', 'hr_employee_id', 'associate_id', 'holder_name', 'department_id'] as $key) {
+                    if (($before[$key] ?? null) !== $values[$key]) $holderChanged = true;
+                }
+                if ($holderChanged) array_unshift($diffs, ['field' => 'Holder',
+                    'before' => $before['holder_kind'] === 'shared' ? $before['department'] . ' (shared)' : ($before['holder_name'] ?? 'Available pool'),
+                    'after' => $assignment[1], 'kind' => 'change']);
+            }
+            if (array_key_exists('location_branch_id', $changes) && !array_filter($diffs, static fn ($diff) => $diff['field'] === 'Location')) {
+                $diffs[] = ['field' => 'Location', 'before' => $before['location'] === null ? null : $before['location'] . ' (#' . ($before['location_branch_id'] ?? 'unlinked') . ')',
+                    'after' => $values['location'] === null ? null : $values['location'] . ' (#' . $values['location_branch_id'] . ')', 'kind' => 'change'];
+            }
+            $rows[] = ['id' => $id, 'version' => $version, 'name' => $before['name'],
+                'holder' => $before['holder_kind'] === 'shared' ? $before['department'] : ($before['holder_name'] ?? 'Available pool'),
+                'before' => $before, 'values' => $changes, 'diffs' => $diffs];
+        }
+        if ($conflicts) throw new ValidationException('Refresh and review devices: #' . implode(', #', $conflicts), 409, $conflicts);
+        return ['input' => $input, 'rows' => $rows, 'assignment' => $assignment];
+    }
+
+    private static function specificationName(string $name): string
+    {
+        return mb_strtolower(preg_replace('/\s+/u', ' ', trim($name)));
+    }
+
+    public function applyBulk(array $plan, HrDirectory $hr): array
+    {
+        return $this->transaction(function () use ($plan, $hr): array {
+            $ids = array_column($plan['rows'], 'id');
+            sort($ids, SORT_NUMERIC);
+            if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $lock = $this->db->prepare('SELECT id FROM inv_devices WHERE id = ? FOR UPDATE');
+                foreach ($ids as $id) { $lock->execute([$id]); $lock->fetchColumn(); $lock->closeCursor(); }
+            }
+            $fresh = $this->previewBulk($plan['input'], $hr);
+            if ($fresh['assignment'] !== $plan['assignment'] || array_column($fresh['rows'], 'values') !== array_column($plan['rows'], 'values')) {
+                throw new ValidationException('Directory or device details changed. Refresh and review again.', 409, $ids);
+            }
+            $changed = 0;
+            foreach ($fresh['rows'] as $row) {
+                if (!$row['values']) continue;
+                $this->update($row['id'], $row['version'], $row['values']);
+                $assignment = $fresh['assignment'];
+                $message = $assignment === null ? 'Bulk device details updated.' : 'Bulk holder change from ' . $row['holder'] . ' to ' . $assignment[1] . '.';
+                if ($assignment !== null && $assignment[3]) $message .= ' ' . $assignment[3];
+                $message .= ' Changes: ' . implode('; ', array_map(static fn ($diff) => $diff['field'] . ': ' . ($diff['before'] ?? 'Not recorded') . ' → ' . ($diff['after'] ?? 'Removed'), $row['diffs']));
+                $type = $assignment === null ? 'edit' : ($row['values']['holder_kind'] ?? $row['before']['holder_kind']);
+                $this->event($row['id'], $assignment === null ? 'edit' : ($type === 'unassigned' ? 'return' : 'assign'),
+                    $message, $assignment[2] ?? null, $row['before']);
+                $changed++;
+            }
+            return ['changed' => $changed, 'unchanged' => count($fresh['rows']) - $changed];
         });
     }
 
